@@ -128,6 +128,8 @@ func split(_ argv: [String]) {
             if mode == .closed { close(outputs[i].fd); outputs[i].fd = -1 }
             outputs[i].mode = mode
         }
+        // 套用完才回報：寫入端等到這份 ack 才能斷開被移除的輸出（斷開後讀端不再讀，FIFO 會寫滿卡住 split）。atomically 即 tmp＋rename
+        try? text.write(toFile: file + ".applied", atomically: true, encoding: .utf8)
     }
 
     _ = fcntl(0, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK)
