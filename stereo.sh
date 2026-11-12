@@ -268,9 +268,14 @@ case ${1:-status} in
     print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
     # 先等 split 回報已套用（它才會關掉被移除的輸出）再斷開：斷開後讀端不再讀，split 若還在寫那個 FIFO 會寫滿卡死，永遠看不到 X
     for i in {1..50}; do [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" == "$routes" ]] && break; sleep 0.02; done
-    (( i == 50 )) && [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" != "$routes" ]] && say "reroute: 1 秒內沒收到 split 的 ack，仍送出 DISCONNECT（交給 watchdog）"
+    # 逾時就不能斷開：split 可能只是卡住，醒來還會寫被移除的 FIFO，沒人讀就永遠卡死。以非 0 結束，serve 退回關了再開
+    [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" == "$routes" ]] || { say "reroute: 1 秒內沒收到 split 的 ack，不斷開，退回重啟"; exit 1; }
+    # watchdog 重啟可能在等 ack 時換了 session：寫 DEVFILE 前後都確認還是同一個，否則不改（或還原）並放棄
+    same() { [[ "$(head -c 256 $RUNDIR_FILE 2>/dev/null)" == $rd ]] && running }
+    same || exit 1
     now="$new${mac:+ Mac}"
     print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
+    same || { print -r -- $cur > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE; exit 1; }
     for d in $gone; do send_cmd $rd/cmd-$d 'ACTION=DISCONNECT'; done
     say "reroute: $cur -> $now"
     ;;

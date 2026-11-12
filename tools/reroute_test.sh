@@ -60,11 +60,21 @@ unchanged "沒有裝置"
 unchanged "不認得的喇叭" CCCCCCCCCCCC
 touch $S/noack; setdev "$A $B"; rm -f $RD/routes.applied
 t0=$EPOCHREALTIME
-rr $B || fail "沒有 ack 時仍要成功"
+before=$(cat $STATE/devices)
+rr $B && fail "沒有 ack 時要以非 0 結束"
 (( EPOCHREALTIME - t0 > 0.9 && EPOCHREALTIME - t0 < 2 )) || fail "沒有 ack 應等約 1 秒，實際 $((EPOCHREALTIME - t0))"
-sleep 0.3; eq "$(cat $S/got-$A)" "ACTION=DISCONNECT" "沒有 ack 仍送出 DISCONNECT"
+sleep 0.3; eq "$(cat $S/got-$A)" "" "沒有 ack 不送 DISCONNECT"
+eq "$(cat $STATE/devices)" $before "沒有 ack 不改 devices"
 grep -q "沒收到 split 的 ack" $LOGDIR/stereo.log || fail "沒有 log timeout 一行"
 rm -f $S/noack
+# ack 的同時把 rundir 換成別的 session：reroute 要放棄、devices 維持原樣、不送 DISCONNECT
+setdev "$A $B"; rm -f $RD/routes.applied; print 0.4 > $S/ackdelay
+{ sleep 0.2; print -r -- $STATE/other > $STATE/rundir } & swp=$!
+rr $B && fail "session 被換掉時要以非 0 結束"
+wait $swp; sleep 0.3
+eq "$(cat $STATE/devices)" "$A $B" "session 被換掉，devices 維持原樣"
+eq "$(cat $S/got-$A)" "" "session 被換掉不送 DISCONNECT"
+print -r -- $RD > $STATE/rundir
 rm -f $STATE/supervisor.pid
 unchanged "沒在播" $A
 print $pids[1] > $STATE/supervisor.pid; rm $RD/ready
