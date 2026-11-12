@@ -119,7 +119,7 @@ supervise() {
   echo $$ > $PIDFILE
   print -r -- $DEVICES > $DEVFILE
   local -a restarts
-  local stamp="" reason now recent t began_at=0 summarized=""
+  local stamp="" snap reason now recent t began_at=0 summarized=""
   # 收到停止時，這段還沒寫摘要才補一列（重啟等待中收到的不重複記）
   trap 'say "stop requested"; [[ -n ${child:-} ]] && kill -TERM $child 2>/dev/null; stop_all; [[ -n $stamp && $stamp != $summarized ]] && summarize $stamp user_stop $began_at; rm -f $PIDFILE; exit 0' TERM INT
   while true; do
@@ -132,7 +132,13 @@ supervise() {
     while ps -p $child >/dev/null 2>&1; do
       sleep $POLL_S & wait $!  # 前景 sleep 會讓停止的 trap 等到睡完才跑
       reread_devices
+      snap=$DEVICES
       reason=$(check $stamp $(( SECONDS - began )))
+      # reroute 可能夾在 reread 與 check 之間：用舊快照會算到已移除的喇叭而誤報，組合變了就重讀再查一次
+      if [[ -n $reason ]]; then
+        reread_devices
+        [[ $DEVICES != $snap ]] && reason=$(check $stamp $(( SECONDS - began )))
+      fi
       [[ -n $reason ]] && break
     done
     [[ -z $reason ]] && reason="run_pair_exited: run_pair exited"
