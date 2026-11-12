@@ -10,11 +10,7 @@ AirPlay Stereo 安裝說明
 安裝
 1. 解壓縮後會有一個資料夾，把裡面的「AirPlay Stereo.app」拖到「應用程式」資料夾。
 2. 打開它。這個 App 沒有經過 Apple 公證，第一次會被擋下：
-   到「系統設定 → 原始碼與授權
-- GNU GPL 第 3 版（GPLv3），條款見同資料夾的 LICENSE 與 THIRD_PARTY_NOTICES.md。
-- 原始碼：https://github.com/NightLightTw/airplay-stereo（下載的版本對應同名的 Release tag）
-
-隱私權與安全性」，往下找到 AirPlay Stereo，按「強制打開」，輸入密碼後在跳出的視窗再按「打開」。
+   到「系統設定 → 隱私權與安全性」，往下找到 AirPlay Stereo，按「強制打開」，輸入密碼後在跳出的視窗再按「打開」。
 3. App 會問「要安裝背景服務嗎？」，按「安裝」並輸入密碼。
 4. 第一次播放時，macOS 可能會詢問錄製系統聲音的權限，請允許，否則喇叭會沒有聲音。
    如果不小心拒絕了：到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」（各版 macOS 名稱略有不同），
@@ -34,6 +30,10 @@ AirPlay Stereo 安裝說明
   其他 Mac（螢幕鏡像接收）會被濾掉，不列在選單裡。
 - 記錄只存在這台 Mac 上。「複製診斷資訊」會把 IP、裝置 ID、喇叭名稱換成代號，送出前請自己再看一次。
 
+原始碼與授權
+- GNU GPL 第 3 版（GPLv3），條款見同資料夾的 LICENSE 與 THIRD_PARTY_NOTICES.md。
+- 原始碼：https://github.com/NightLightTw/airplay-stereo（下載的版本對應同名的 Release tag）
+
 
 AirPlay Stereo — install guide (English)
 
@@ -50,3 +50,6 @@ Needs: an Apple silicon Mac on macOS 14.4 or later, speakers on the same Wi‑Fi
 5. Click the speaker icon in the menu bar and select your speakers (they appear within about a minute).
 
 To remove: Settings → General → Background helper → Remove, then move the app to the Trash.
+
+License: GNU GPL version 3, see LICENSE and THIRD_PARTY_NOTICES.md in this folder.
+Source: https://github.com/NightLightTw/airplay-stereo (the release tag matches this download).
