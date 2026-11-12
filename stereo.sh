@@ -105,6 +105,13 @@ prune_logs() {
   true
 }
 
+# 播放中 reroute 會改 DEVFILE（少一台喇叭、開關 Mac）：supervisor 跟著它，重啟與 check 才不會再算到已移除的喇叭
+reread_devices() {
+  local d=$(head -c 64 $DEVFILE 2>/dev/null)
+  [[ -n $d ]] && DEVICES=$d
+  true
+}
+
 supervise() {
   trap '' HUP
   say "supervisor pid $$ as $(whoami)"
@@ -115,6 +122,7 @@ supervise() {
   # 收到停止時，這段還沒寫摘要才補一列（重啟等待中收到的不重複記）
   trap 'say "stop requested"; [[ -n ${child:-} ]] && kill -TERM $child 2>/dev/null; stop_all; [[ -n $stamp && $stamp != $summarized ]] && summarize $stamp user_stop $began_at; rm -f $PIDFILE; exit 0' TERM INT
   while true; do
+    reread_devices
     stamp=$(date +%y%m%d-%H%M%S) began_at=$(date +%s)  # 含日期：跨日同一秒不會覆寫還在保留期的 log
     say "start $DEVICES left=${LEFT:-} mac_sync_ms=${LOCAL_ADJ_MS:-0} (log tag $stamp)"
     SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE RUNDIR_FILE=$RUNDIR_FILE DEVICES=$DEVICES STAMP=$stamp DEBUG=3 zsh $RUN_PAIR live $LATENCY $TARGET >> $LOG 2>&1 &
@@ -122,6 +130,7 @@ supervise() {
     reason="" began=$SECONDS
     while ps -p $child >/dev/null 2>&1; do
       sleep $POLL_S & wait $!  # 前景 sleep 會讓停止的 trap 等到睡完才跑
+      reread_devices
       reason=$(check $stamp $(( SECONDS - began )))
       [[ -n $reason ]] && break
     done
@@ -227,6 +236,32 @@ case ${1:-status} in
     elif running; then echo "on $(head -c 64 $DEVFILE 2>/dev/null)"; else echo "off"; fi
     tail -1 $LOG 2>/dev/null || true
     ;;
+  reroute)  # 播放中不重啟就改輸出：只能少喇叭、或只開關 Mac。做不到就以非 0 結束且什麼都不動，serve 會退回關了再開
+    shift
+    running || exit 1
+    rd=$(head -c 256 $RUNDIR_FILE 2>/dev/null)
+    [[ $rd == /tmp/cliairplay-pair.* || ( -n ${TEST:-} && $rd == $STATE/* ) ]] || exit 1
+    [[ -O $rd && -f $rd/ready && -p $rd/pcm-Mac ]] || exit 1  # pcm-Mac：舊版 run_pair 起的這段沒有 routes 可改
+    cur=$(head -c 64 $DEVFILE 2>/dev/null)
+    new=() mac=
+    for w in "$@"; do
+      if [[ $w == Mac ]]; then mac=1
+      elif [[ $w == [0-9A-F](#c12) && " $cur " == *" $w "* ]]; then new+=$w
+      else exit 1; fi
+    done
+    (( $#new )) || exit 1
+    l=$new[1] r=${new[2]:-}
+    [[ -n $r && ${LEFT:-} == $r ]] && l=$r r=$new[1]
+    (( $#new == 2 )) && routes="$rd/pcm-$l:L $rd/pcm-$r:R" || routes="$rd/pcm-$l:LR"
+    gone=(); for d in ${=cur}; do [[ $d != Mac && -z ${new[(r)$d]:-} ]] && gone+=$d; done
+    for d in $gone; do routes+=" $rd/pcm-$d:X"; done
+    routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)"
+    print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
+    now="$new${mac:+ Mac}"
+    print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
+    for d in $gone; do send_cmd $rd/cmd-$d 'ACTION=DISCONNECT'; done
+    say "reroute: $cur -> $now"
+    ;;
   supervise) supervise ;;
   discover) discover ;;
   serve)  # 背景服務（root）：App 改寫 want 檔時才照內容開或關。只在檔案變動時動作，自癒放棄後不會被立刻拉起來
@@ -259,13 +294,16 @@ case ${1:-status} in
         if [[ $want == off ]]; then running && zsh $0 off
         # 改裝置組合：不是已經在播這組就起播。只改設定：正在播才重新起播（自癒放棄後不會被設定拉起來）
         elif [[ -n $want_changed ]] && [[ $(zsh $0 status | head -1) != "on $want" ]] || { [[ -n $cfg_changed ]] && running }; then
-          running && zsh $0 off
           # Mac 喇叭的對齊微調（ms）：只接受 -300 到 300 的整數，其他當 0。左聲道：這次要播的其中一台，其他當第一台
           adj=$(read_user $dir/mac-sync-ms | tr -d ' \n')  # 原樣驗證，不先濾字元（1e2 不能變成 12）
           [[ $adj == (|-)<0-300> ]] || adj=0
           left=$(read_user $dir/left | tr -cd 'A-Z0-9')
           [[ " $want " == *" $left "* && $left != Mac ]] || left=${want%% *}
-          LEFT=$left LOCAL_ADJ_MS=$adj zsh $0 on ${=want}
+          # 只是裝置組合變動（少一台、開關 Mac）就不中斷留下的輸出；reroute 做不到才關了再開
+          if ! { [[ -z $cfg_changed ]] && running && LEFT=$left zsh $0 reroute ${=want} }; then
+            running && zsh $0 off
+            LEFT=$left LOCAL_ADJ_MS=$adj zsh $0 on ${=want}
+          fi
         fi
       fi
       # 音量（如「<喇叭 ID>=40 …」）：只認喇叭 ID、0–100 的整數，整理後原子寫到 root 的 VOLFILE 給起播用
