@@ -168,7 +168,9 @@ func split(_ argv: [String]) {
             guard let at = at else { continue }
             guard at >= written else { reject("\(path) 排定的 frame \(at) 已經寫出（現在 \(written)）"); return }
             var fd: Int32 = -1
-            if mode != .closed, !outputs.contains(where: { $0.path == path }) {
+            let known = outputs.first { $0.path == path }
+            guard known?.mode != .closed || mode == .closed else { reject("\(path) 已經關掉，不能再排程"); return }
+            if mode != .closed, known == nil {
                 // 非阻塞開啟：FIFO 沒有讀端時直接失敗而不是卡住全部輸出；開好再改回阻塞寫，和其他輸出一樣
                 fd = open(path, O_WRONLY | O_NONBLOCK)
                 guard fd >= 0 else { reject("開不了 \(path)"); return }
