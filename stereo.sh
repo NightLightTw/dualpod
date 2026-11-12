@@ -74,7 +74,8 @@ check() {  # stamp elapsed_s
     return
   fi
   (( $(pgrep -x cliairplay-macos-arm64 | wc -l) < $#logs + 1 )) && { print "client_exited: a cliairplay process exited"; return; }
-  [[ " $DEVICES " == *" Mac "* ]] && ! pgrep -x localplay >/dev/null && print "local_player_exited: local player exited"
+  # live 一律起 localplay（Mac 關著時 split 也寫它的 FIFO 當靜音），它死了 split 會卡住所有輸出，所以不看 Mac 有沒有開
+  pgrep -x localplay >/dev/null || print "local_player_exited: local player exited"
 }
 
 # 一段播放一列摘要（學 AirFlash 的 session-summary.csv）。只記 ID 與數字，不記 IP、名稱
