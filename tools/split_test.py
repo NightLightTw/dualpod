@@ -84,7 +84,18 @@ def feed(secs):  # 照絕對時間送，不累積 sleep 的誤差，輸入才不
 feed(1.0)
 t_switch = time.time()
 put_routes(f"{fp['a']}:LR {fp['b']}:X {fp['m']}:LR")
-threading.Timer(0.3, lambda: stop.__setitem__("b", True)).start()  # b 的讀端死掉；這段不能停餵，否則會被補靜音
+def handshake():  # 和 stereo.sh reroute 一樣：等 split 回報已套用，才讓 b 的讀端消失；沒等的話 split 會卡在寫 b，永遠看不到 X
+    ack = routes + ".applied"
+    end = time.time() + 2
+    want = open(routes).read()
+    while time.time() < end:
+        try:
+            if open(ack).read() == want: break
+        except FileNotFoundError: pass
+        time.sleep(0.01)
+    else: raise AssertionError("split 沒有回報已套用")
+    stop["b"] = True
+threading.Thread(target=handshake).start()  # 不能停餵，否則會被補靜音
 feed(1.5)
 t_end = time.time()
 time.sleep(0.2)
@@ -105,5 +116,6 @@ src_l = [l for l, _ in fa if l != 0]
 assert all((y - x) % W == 1 for x, y in zip(src_l, src_l[1:])), "a 的樣本編號跨過切換仍連續（沒丟沒重複）"
 after = [t for t, _ in chunks["a"] if t_switch < t < t_end]
 gap = max(y - x for x, y in zip(after, after[1:]))
+assert len(fa) > sw_a + 10000 and len(fm) > sw_m + 10000, "切換後 a、m 持續收到資料"
 assert gap < 0.06, f"a 切換後的最大到達間隔 {gap:.3f}s"
 print(f"split reroute self-test ok (switch at frame {sw_a}, b frames {len(fb)}, a gap {gap*1000:.0f} ms)")
