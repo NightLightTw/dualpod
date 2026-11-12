@@ -24,8 +24,10 @@ threads = [threading.Thread(target=reader, args=(i,)) for i in range(3)]
 for t in threads: t.start()
 time.sleep(0.2)
 b = src.tobytes()
-for i in range(0, len(b), 3528):  # 和 tap 一樣每 20 ms 送一塊；一次全塞會被當成超前而丟掉
-    pr.stdin.write(b[i:i + 3528]); pr.stdin.flush(); time.sleep(0.02)
+nxt = time.time()
+for i in range(0, len(b), 3528):  # 和 tap 一樣每 20 ms 送一塊（照絕對時間，免得 sleep 誤差累積成補靜音）；一次全塞會被當成超前而丟掉
+    nxt += 0.02
+    pr.stdin.write(b[i:i + 3528]); pr.stdin.flush(); time.sleep(max(0, nxt - time.time()))
 for t in threads: t.join()
 pr.kill()
 def body(b):
