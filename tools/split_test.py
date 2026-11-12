@@ -51,6 +51,7 @@ for p in fp.values():
     os.mkfifo(p)
 routes = f"{d}/routes"
 def put_routes(text):
+    if os.path.exists(routes + ".applied"): os.remove(routes + ".applied")  # 和 reroute 一樣先清舊 ack，免得上一輪殘留的被當成這次的
     with open(routes + ".tmp", "w") as f: f.write(text)
     os.rename(routes + ".tmp", routes)
 put_routes(f"{fp['a']}:L {fp['b']}:R {fp['m']}:0")
@@ -84,6 +85,7 @@ def feed(secs):  # 照絕對時間送，不累積 sleep 的誤差，輸入才不
 feed(1.0)
 t_switch = time.time()
 put_routes(f"{fp['a']}:LR {fp['b']}:X {fp['m']}:LR")
+ok = []
 def handshake():  # 和 stereo.sh reroute 一樣：等 split 回報已套用，才讓 b 的讀端消失；沒等的話 split 會卡在寫 b，永遠看不到 X
     ack = routes + ".applied"
     end = time.time() + 2
@@ -95,13 +97,16 @@ def handshake():  # 和 stereo.sh reroute 一樣：等 split 回報已套用，�
         time.sleep(0.01)
     else: raise AssertionError("split 沒有回報已套用")
     stop["b"] = True
-threading.Thread(target=handshake).start()  # 不能停餵，否則會被補靜音
+    ok.append(1)  # 只有成功才設；thread 裡的例外主執行緒看不到，所以靠這個旗標
+hs = threading.Thread(target=handshake); hs.start()  # 不能停餵，否則會被補靜音
 feed(1.5)
+hs.join()
 t_end = time.time()
 time.sleep(0.2)
-stop["a"] = stop["m"] = True
+stop["a"] = stop["m"] = stop["b"] = True  # ack 沒來時 b 不會被 handshake 停掉，這裡補停才不會卡在 join
 for t in threads: t.join()
 pr.kill()
+assert ok, "split 沒有回報已套用（.applied）"
 def frames(k):
     a = array.array("h", b"".join(b for _, b in chunks[k])); return list(zip(a[0::2], a[1::2]))
 fa, fb, fm = frames("a"), frames("b"), frames("m")
