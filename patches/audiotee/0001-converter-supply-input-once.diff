@@ -1,0 +1,21 @@
+diff --git a/Sources/AudioTeeCore/Core/AudioFormatConverter.swift b/Sources/AudioTeeCore/Core/AudioFormatConverter.swift
+index 5a52284..29cdac1 100644
+--- a/Sources/AudioTeeCore/Core/AudioFormatConverter.swift
++++ b/Sources/AudioTeeCore/Core/AudioFormatConverter.swift
+@@ -152,8 +152,16 @@ public class AudioFormatConverter {
+     // across chunks (avoiding discontinuity artifacts).
+     var error: NSError?
+ 
++    // 這一塊只能交出去一次：重採樣器為了往前看會再要資料，原版每次都回同一塊，
++    // 等於每 20 ms 把一小段重播一次，音樂聽起來就有一層「呲呲」雜訊
++    var supplied = false
+     let status = avConverter.convert(to: outputBuffer, error: &error) {
+       requestedPackets, outStatus in
++      if supplied {
++        outStatus.pointee = .noDataNow
++        return nil
++      }
++      supplied = true
+       outStatus.pointee = .haveData
+       return inputBuffer
+     }

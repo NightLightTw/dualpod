@@ -1,0 +1,21 @@
+diff --git a/src/ap2_ptp.c b/src/ap2_ptp.c
+index 61011ec..c73a9ab 100644
+--- a/src/ap2_ptp.c
++++ b/src/ap2_ptp.c
+@@ -645,11 +645,12 @@ static int ptp_open_socket(struct ap2_ptp_ctx *ctx, uint16_t port)
+     int yes = 1;
+     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+ 
+-    /* Bind INADDR_ANY:port. Binding a specific unicast address would stop the
+-     * kernel from delivering datagrams sent to the multicast group on BSD and
+-     * Linux; the interface is selected by the group join. */
++    /* macOS: kernel_task (gPTP) holds *:319/320, so with --interface bind that
++     * unicast address instead; it wins delivery over the wildcard socket.
++     * shortcut: multicast to 224.0.1.129 no longer reaches us; Apple receivers
++     * negotiate unicast PTP, revisit if a receiver relies on multicast. */
+     struct sockaddr_in a = {
+-        .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = INADDR_ANY,
++        .sin_family = AF_INET, .sin_port = htons(port), .sin_addr = ctx->bind_addr,
+     };
+     if (bind(s, (struct sockaddr *)&a, sizeof(a)) < 0) {
+         close(s);

@@ -1,0 +1,32 @@
+#!/bin/zsh
+# 取得兩個上游專案、套上 patches/ 裡的修改、編出 app/build.sh 要打包的執行檔：
+#   airplay-cli（cliairplay，GPLv3）→ airplay-cli/bin/cliairplay-macos-arm64
+#   audiotee（MIT）                → audiotee/.build/release/audiotee
+# 用法：zsh scripts/fetch-deps.sh（需要 Xcode 或 Command Line Tools）
+set -eu
+ROOT=${0:A:h:h}
+export MACOSX_DEPLOYMENT_TARGET=14.4  # 系統錄音（process tap）從 14.4 才有
+
+fetch() {  # 資料夾 網址 commit
+  local dir=$ROOT/$1 url=$2 rev=$3 p
+  [[ -d $dir/.git ]] || git clone --quiet "$url" "$dir"
+  local -a patches=($ROOT/patches/$1/*.diff(N))
+  # 已經套過（例如開發用的那份）就不再動它
+  if (( $#patches )) && git -C "$dir" apply --reverse --check $patches 2>/dev/null; then
+    echo "$1: patches already applied"
+    # 開發用的 clone 可能停在別的 commit：發布用的版本要從乾淨 clone 建，這裡只提醒
+    [[ $(git -C "$dir" rev-parse HEAD) == $rev ]] || echo "$1: note: checkout is not at $rev, rebuild from a fresh clone for a release"
+    return
+  fi
+  git -C "$dir" fetch --quiet origin "$rev" 2>/dev/null || true
+  git -C "$dir" checkout --quiet --detach "$rev"
+  git -C "$dir" submodule update --quiet --init --recursive
+  for p in $patches; do git -C "$dir" apply "$p"; echo "$1: applied ${p:t}"; done
+}
+
+fetch airplay-cli https://github.com/music-assistant/airplay-cli.git 0a58c239d5fb3cf8927b9707a71c6fe897266b6a
+fetch audiotee https://github.com/makeusabrew/audiotee.git 56ac954369a09318e46b88a6eec33c2d2b0d32a3
+
+make -C "$ROOT/airplay-cli" -j8 STATIC=1 CC=clang CXX=clang++  # STATIC=1：不依賴 Homebrew 的 OpenSSL
+(cd "$ROOT/audiotee" && swift build -c release)
+echo "ok: now run zsh app/build.sh"

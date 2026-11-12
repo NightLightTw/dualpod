@@ -1,0 +1,232 @@
+diff --git a/DESIGN.md b/DESIGN.md
+index 5e67fb8..7fd6465 100644
+--- a/DESIGN.md
++++ b/DESIGN.md
+@@ -123,7 +123,14 @@ Connect sequence (`ap2_native_connect()`):
+    `latencyMin`/`latencyMax` (when present) clamp our lead and size the
+    pacing window (§6).
+ 7. For PTP sessions, **SETPEERS** (a bare plist array `[receiver, us]`) and
+-   the same peer list handed to the PTP engine.
++   the same peer list handed to the PTP engine. An Apple receiver, and any
++   followed receiver (§5), gets **SETPEERSX** instead: the same two members
++   as timing-peer dicts (`ID`, `DeviceType`, `ClockID` for us,
++   `SupportsClockPortMatchingOverride`, `Addresses`), the form current Apple
++   senders use. On a bare SETPEERS the HomePod mini 2 (`AudioAccessory11,1`)
++   stays silent: when we are grandmaster it never takes our clock, and when
++   followed it stops sending us its Sync. On SETPEERSX it takes our clock, or
++   keeps its own running, and plays.
+ 
+ The audio key (`shk`) is the first 32 bytes of the pairing shared secret —
+ the raw X25519 secret for pair-verify, `SHA512(S)[:32]` for transient.
+diff --git a/src/ap2_client.c b/src/ap2_client.c
+index 419b2c5..635206d 100644
+--- a/src/ap2_client.c
++++ b/src/ap2_client.c
+@@ -428,6 +428,8 @@ struct ap2cl_s {
+     bool ptp_forced;   /* ap2cl_set_ptp() was called (overrides auto-detect) */
+     bool ptp_enabled;  /* value passed to ap2cl_set_ptp() */
+     bool ptp_shared;   /* prefer a shared PTP daemon clock (multi-room) if present */
++    bool follow_clock; /* the engine follows this receiver's own clock (standalone HomePod) */
++    char timing_peer_id[37]; /* our timing-peer ID in the session SETUP and SETPEERSX */
+ };
+ 
+ static int ap2_mrp_send_playback_state(struct ap2cl_s *p,
+@@ -1562,13 +1564,14 @@ static void ap2_parse_format_capability(const uint8_t *data, size_t len,
+         *known = true;
+ }
+ 
+-/* Build one timing-peer dict {ID, DeviceType, ClockID, SupportsClockPort..., Addresses:[addr]}. */
++/* Build one timing-peer dict {ID, DeviceType, ClockID, SupportsClockPort..., Addresses:[addr]}.
++ * A clock_id of 0 leaves ClockID out (a peer whose clock we do not name). */
+ static ap2_pl_node *ap2_make_timing_peer(const char *id, uint64_t clock_id, const char *addr)
+ {
+     ap2_pl_node *d = ap2_pl_dict();
+     ap2_pl_dict_set(d, "ID", ap2_pl_string(id));
+     ap2_pl_dict_set(d, "DeviceType", ap2_pl_int(0));
+-    ap2_pl_dict_set(d, "ClockID", ap2_pl_int((int64_t)clock_id));
++    if (clock_id) ap2_pl_dict_set(d, "ClockID", ap2_pl_int((int64_t)clock_id));
+     ap2_pl_dict_set(d, "SupportsClockPortMatchingOverride", ap2_pl_bool(false));
+     ap2_pl_node *addrs = ap2_pl_array();
+     ap2_pl_array_append(addrs, ap2_pl_string(addr));
+@@ -1576,6 +1579,26 @@ static ap2_pl_node *ap2_make_timing_peer(const char *id, uint64_t clock_id, cons
+     return d;
+ }
+ 
++const char *ap2_build_setpeers(bool timing_peers, const char *our_id, uint64_t our_clock_id,
++                               const char *our_addr, const char *receiver_addr,
++                               uint8_t **out, int *out_len)
++{
++    ap2_pl_node *arr = ap2_pl_array();
++    if (timing_peers) {
++        char receiver_id[37];
++        ap2_gen_uuid(receiver_id);
++        ap2_pl_array_append(arr, ap2_make_timing_peer(our_id, our_clock_id, our_addr));
++        ap2_pl_array_append(arr, ap2_make_timing_peer(receiver_id, 0, receiver_addr));
++    } else {
++        ap2_pl_array_append(arr, ap2_pl_string(receiver_addr));
++        ap2_pl_array_append(arr, ap2_pl_string(our_addr));
++    }
++    *out = NULL;
++    *out_len = ap2_pl_serialize(arr, out);
++    ap2_pl_free(arr);
++    return timing_peers ? "SETPEERSX" : "SETPEERS";
++}
++
+ /* Issue the type-130 remote-control (MRP) data-channel stream SETUP on the
+  * already-verified RTSP session, then attach the MRP sender to the returned
+  * dataPort (DESIGN.md §8, the "combined/piggyback" model). This is
+@@ -2005,6 +2028,7 @@ static bool ap2_native_connect(struct ap2cl_s *p)
+          * than served: the engine — in-process or the shared daemon — reads
+          * its Announce/Sync and expresses this session's timeline in it. */
+         bool follow = ap2_follow_receiver_clock(p->device.txt_records, p->am);
++        p->follow_clock = follow;
+         if (follow)
+             LOG_INFO("[AP2] Receiver keeps its own PTP clock (standalone HomePod); "
+                      "following it instead of serving ours");
+@@ -2046,8 +2070,8 @@ static bool ap2_native_connect(struct ap2cl_s *p)
+     /* 4. Session SETUP (encrypted). PTP and NTP use different session dicts. */
+     uint8_t *plist_data = NULL; int plist_len = 0;
+     if (p->use_ptp) {
+-        char peer_id[37];
+-        ap2_gen_uuid(peer_id);
++        ap2_gen_uuid(p->timing_peer_id);
++        const char *peer_id = p->timing_peer_id;
+         const char *name = (p->device.name && *p->device.name) ? p->device.name : "cliairplay";
+ 
+         /* Advertise OUR clock as the session timeline (the engine holds
+@@ -2372,22 +2396,23 @@ static bool ap2_native_connect(struct ap2cl_s *p)
+                  p->device.address, ntohs(p->data_addr.sin_port));
+     }
+ 
+-    /* 6. SETPEERS (PTP only): a bare binary-plist array of IP strings
+-     * [receiver, us] so the receiver knows the timing group members. */
++    /* 6. SETPEERS (PTP only) so the receiver knows the timing group members
++     * [receiver, us]; SETPEERSX for an Apple or followed receiver
++     * (ap2_build_setpeers). */
+     if (p->use_ptp) {
+-        ap2_pl_node *arr = ap2_pl_array();
+-        ap2_pl_array_append(arr, ap2_pl_string(p->device.address));
+-        ap2_pl_array_append(arr, ap2_pl_string(our_addr));
+         uint8_t *sp_data = NULL;
+-        int sp_len = ap2_pl_serialize(arr, &sp_data);
+-        ap2_pl_free(arr);
++        int sp_len = 0;
++        const char *method = ap2_build_setpeers(p->apple_model || p->follow_clock,
++                                                p->timing_peer_id,
++                                                ap2_ptp_master_clock_id(p->ptp), our_addr,
++                                                p->device.address, &sp_data, &sp_len);
+ 
+         resp = NULL; resp_len = 0;
+-        int sp_status = ap2_rtsp_send(p, "SETPEERS", p->session_url, sp_data, sp_len,
++        int sp_status = ap2_rtsp_send(p, method, p->session_url, sp_data, sp_len,
+                                        "application/x-apple-binary-plist", &resp, &resp_len);
+         free(sp_data);
+         free(resp);
+-        LOG_INFO("[AP2] SETPEERS [%s, %s] -> %d", p->device.address, our_addr, sp_status);
++        LOG_INFO("[AP2] %s [%s, %s] -> %d", method, p->device.address, our_addr, sp_status);
+         if (sp_status <= 0) return false;
+ 
+         const char *peers[2] = { p->device.address, our_addr };
+diff --git a/src/ap2_client.h b/src/ap2_client.h
+index ebca471..bb9fcd5 100644
+--- a/src/ap2_client.h
++++ b/src/ap2_client.h
+@@ -162,6 +162,28 @@ bool ap2_buffered_route(const ap2_route_t *route, const char *txt,
+  */
+ bool ap2_follow_receiver_clock(const char *txt, const char *am);
+ 
++/*
++ * Build the SETPEERS body naming the timing group [receiver, us]. An Apple
++ * receiver, or one whose clock we follow (see ap2_follow_receiver_clock),
++ * gets SETPEERSX: one timing-peer dict per member as current Apple senders
++ * send it, ours repeating the session SETUP entry. On a bare SETPEERS the
++ * HomePod mini 2 (AudioAccessory11,1) ignores our clock and, when followed,
++ * stops sending its own, so it stays silent either way. Every other receiver
++ * gets the bare SETPEERS array of address strings.
++ *
++ * :param timing_peers: send SETPEERSX with timing-peer dicts.
++ * :param our_id: our timing-peer ID from the session SETUP.
++ * :param our_clock_id: the session timeline clock ID from the SETUP.
++ * :param our_addr: the address we advertise to the receiver.
++ * :param receiver_addr: the receiver's address.
++ * :param out: receives the serialized body, freed by the caller.
++ * :param out_len: receives its length, 0 on error.
++ * :returns: the RTSP method, "SETPEERSX" or "SETPEERS".
++ */
++const char *ap2_build_setpeers(bool timing_peers, const char *our_id, uint64_t our_clock_id,
++                               const char *our_addr, const char *receiver_addr,
++                               uint8_t **out, int *out_len);
++
+ /* Why the last connect attempt failed, for the caller's structured report. */
+ typedef enum {
+     AP2_CONNECT_ERROR_NONE = 0,
+diff --git a/tests/test_ap2_client.c b/tests/test_ap2_client.c
+index b497aa3..411f074 100644
+--- a/tests/test_ap2_client.c
++++ b/tests/test_ap2_client.c
+@@ -618,6 +618,48 @@ static void test_follow_receiver_clock_resolution(void)
+     puts("ap2_client follow-receiver-clock resolution tests passed");
+ }
+ 
++static size_t count_bytes(const uint8_t *data, int len, const char *needle)
++{
++    size_t n = 0, nl = strlen(needle);
++    for (int i = 0; i + (int)nl <= len; i++)
++        if (memcmp(data + i, needle, nl) == 0) n++;
++    return n;
++}
++
++static void test_setpeers_body(void)
++{
++    const uint64_t clock_id = 0xA1B2C3D4E5F60718ULL;
++    uint8_t *body = NULL;
++    int len = 0;
++    uint64_t v = 0;
++    size_t n = 0;
++
++    /* An Apple or followed receiver: SETPEERSX with one timing-peer dict per member,
++     * only ours naming a clock. The writer keeps a key per dict, so counting
++     * key bytes counts the dicts that carry it. */
++    const char *method = ap2_build_setpeers(true, "PEER-ID", clock_id, "10.0.0.2", "10.0.0.9",
++                                            &body, &len);
++    assert(strcmp(method, "SETPEERSX") == 0);
++    assert(body && len > 0);
++    assert(ap2_bplist_find_uint(body, (size_t)len, "ClockID", &v) && v == clock_id);
++    assert(ap2_bplist_find_array_count(body, (size_t)len, "Addresses", &n) && n == 1);
++    assert(count_bytes(body, len, "Addresses") == 2);
++    assert(count_bytes(body, len, "ClockID") == 1);
++    assert(count_bytes(body, len, "PEER-ID") == 1);
++    assert(count_bytes(body, len, "10.0.0.2") == 1 && count_bytes(body, len, "10.0.0.9") == 1);
++    free(body);
++
++    /* A third-party receiver: the bare SETPEERS array of the two addresses. */
++    method = ap2_build_setpeers(false, "PEER-ID", clock_id, "10.0.0.2", "10.0.0.9", &body, &len);
++    assert(strcmp(method, "SETPEERS") == 0);
++    assert(body && len > 0);
++    assert(!ap2_bplist_find_uint(body, (size_t)len, "ClockID", &v));
++    assert(count_bytes(body, len, "Addresses") == 0);
++    assert(count_bytes(body, len, "10.0.0.2") == 1 && count_bytes(body, len, "10.0.0.9") == 1);
++    free(body);
++    puts("ap2_client setpeers body tests passed");
++}
++
+ /* Forced timing and the forced compat flow: NTP-forced routes drop PTP (and
+  * with it any buffered eligibility) even on receivers that advertise both
+  * bits, and an explicit airplay2-compat preference outranks every native
+@@ -1911,6 +1953,8 @@ static void test_apple_model_resolution(void)
+         "model=AppleTV11,1 features=0x4A7FDFD5,0x3C177FDE", NULL));
+     assert(ap2cl_test_apple_model_default(NULL, "AudioAccessory5,1"));
+     assert(ap2cl_test_apple_model_default("model=Mac16,10", NULL));
++    /* HomePod mini 2: needs SETPEERSX (ap2_build_setpeers). */
++    assert(ap2cl_test_apple_model_default("acl=0 model=AudioAccessory11,1 osvers=27.2", NULL));
+     assert(!ap2cl_test_apple_model_default("model=Era 100", NULL));
+     assert(!ap2cl_test_apple_model_default("model=HW-LS60D", NULL));
+     assert(!ap2cl_test_apple_model_default(NULL, "Era 100"));
+@@ -2749,6 +2793,7 @@ int main(void)
+     test_buffered_route_resolution();
+     test_forced_timing_and_compat_route();
+     test_follow_receiver_clock_resolution();
++    test_setpeers_body();
+     test_route_explicit_airplay2();
+     test_auth_error_kind();
+     test_pair_verify_headers_only_reply();

@@ -1,0 +1,22 @@
+# 上游專案：由 scripts/fetch-deps.sh 取得並套用 patches/
+/airplay-cli/
+/audiotee/
+
+# 建置產物
+/app/AirPlay Stereo.app/
+/dist/
+/tools/localplay
+/tools/stereotool
+/tools/rec
+__pycache__/
+.DS_Store
+
+# 本機資料：log 有 IP 與裝置 ID，checks 是麥克風錄到的房間聲音，signals 由 measure.py gen 產生（clip 錄自影片，不可散佈）
+/logs/
+/checks/
+/signals/
+/state/
+
+# 只在開發初期用過、寫死本機設定的腳本，已被 stereotool 與 app 取代
+/run_one.sh
+/tools/split.py
