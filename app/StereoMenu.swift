@@ -165,6 +165,7 @@ final class App: NSObject, NSApplicationDelegate {
     let settings = SettingsModel()
     let channelTest = ChannelTest()
     var settingsWindow: NSWindow?
+    var settingsTabs: SettingsTabs?
     let quit = NSMenuItem(title: "", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     var actual: Set<String> = ["Mac"]  // what the service is playing to now
     var pending: (want: Set<String>, deadline: Date)?  // picked, waiting for the service to get there
@@ -267,7 +268,7 @@ final class App: NSObject, NSApplicationDelegate {
             : t("Background helper stopped. Reinstall…", "背景服務停止了，重新安裝…")
         warning.isHidden = helper == "ok"
         warning.isEnabled = !settings.helperBusy
-        settings.helper = helper
+        if settings.helper != helper { settings.helper = helper }  // unchanged values would redraw the panes every 2 s
         let pair = shown.filter { $0 != "Mac" }.sorted()
         let left = pair.contains(settings.left) ? settings.left : pair.first ?? ""  // the service defaults the same way
         for d in devices {
@@ -283,31 +284,49 @@ final class App: NSObject, NSApplicationDelegate {
         lastLine.title = t("Last event: ", "上次事件：") + last.dropFirst(11)
         lastLine.isHidden = !(last.contains("restart:") || last.contains("gave up"))
         settingsItem.title = t("Settings…", "設定…")
-        settings.service = first
         let playing = actual.filter { $0 != "Mac" }.sorted()
-        settings.pair = playing.count == 2 ? playing : []
-        settings.pairPlaying = pending == nil && playing.count == 2
-        settings.canAlign = pending == nil && actual.contains("Mac") && !playing.isEmpty
-        settingsWindow?.title = t("AirPlay Stereo Settings", "AirPlay Stereo 設定")
+        if settings.playing != playing { settings.playing = playing }
+        if settings.switching != (pending != nil) { settings.switching = pending != nil }
+        let canAlign = pending == nil && actual.contains("Mac") && !playing.isEmpty
+        if settings.canAlign != canAlign { settings.canAlign = canAlign }
+        settingsTabs?.label()
         quit.title = t("Quit AirPlay Stereo", "結束 AirPlay Stereo")
     }
 
     @objc func openSettings() {
         if settingsWindow == nil {
-            let view = SettingsView(model: settings,
-                                    playTest: { [weak self] in self?.channelTest.play() },
-                                    autoAlign: { [weak self] in self?.runAutoAlign() },
-                                    openLogs: { [weak self] in self?.openLogs() },
-                                    copyDiagnostics: { [weak self] in self?.copyDiagnostics() },
-                                    installHelper: { [weak self] in self?.runHelper(remove: false) },
-                                    uninstallHelper: { [weak self] in self?.uninstallHelper() })
-            let w = NSWindow(contentViewController: NSHostingController(rootView: view))
+            let audio = NSHostingController(rootView: AudioPane(
+                model: settings,
+                playChannel: { [weak self] right in self?.channelTest.play(right: right) },
+                autoAlign: { [weak self] in self?.runAutoAlign() },
+                installHelper: { [weak self] in self?.runHelper(remove: false) },
+                openMenu: { [weak self] in self?.item.button?.performClick(nil) }))
+            let general = NSHostingController(rootView: GeneralPane(
+                model: settings,
+                openLogs: { [weak self] in self?.openLogs() },
+                copyDiagnostics: { [weak self] in self?.copyDiagnostics() },
+                installHelper: { [weak self] in self?.runHelper(remove: false) },
+                uninstallHelper: { [weak self] in self?.uninstallHelper() }))
+            audio.sizingOptions = .preferredContentSize  // the window takes each pane's own height
+            general.sizingOptions = .preferredContentSize
+            let lastPane = UserDefaults.standard.integer(forKey: SettingsTabs.key)  // before adding tabs: the first one selects itself and saves 0
+            let tabs = SettingsTabs()
+            tabs.tabStyle = .toolbar
+            for (vc, symbol) in [(audio, "hifispeaker.2"), (general, "gearshape")] as [(NSViewController, String)] {
+                let tab = NSTabViewItem(viewController: vc)
+                tab.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                tabs.addTabViewItem(tab)
+            }
+            tabs.label()
+            tabs.selectedTabViewItemIndex = min(max(lastPane, 0), tabs.tabViewItems.count - 1)
+            let w = NSWindow(contentViewController: tabs)
             w.styleMask = [.titled, .closable]
+            w.toolbarStyle = .preference
             w.isReleasedWhenClosed = false
+            settingsTabs = tabs
             settingsWindow = w
             w.center()
         }
-        settingsWindow?.title = t("AirPlay Stereo Settings", "AirPlay Stereo 設定")
         NSApp.activate(ignoringOtherApps: true)  // menu bar apps aren't active, so the window would open behind
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
@@ -369,6 +388,7 @@ final class App: NSObject, NSApplicationDelegate {
         guard settings.canAlign, !settings.aligning else { return }
         let s = settings
         let before = s.appliedSync
+        s.sync = before  // an unapplied value in the field would be overwritten by the result anyway
         let volume = macVolume
         let probe = before + AutoAlign.probeMs
         let outputs = actual
@@ -377,19 +397,19 @@ final class App: NSObject, NSApplicationDelegate {
         let seen = logLines().count
         // Survives a crash or force quit: the next launch puts these back (see restoreAfterAlign)
         guard writeSetting(alignRestoreFile, "\(before) \(volume)"), writeSetting(syncFile, String(probe)) else {
-            s.alignStatus = t("Couldn't save settings. Nothing changed.", "無法寫入設定，對齊值沒有改。"); return
+            s.syncStatus = t("Couldn't save settings. Nothing changed.", "無法寫入設定，對齊值沒有改。"); return
         }
         s.aligning = true
-        s.alignStatus = t("Preparing… (the speakers reconnect)", "準備中…（喇叭會重新連線）")
-        func finish(_ adj: Int, _ message: String) {
+        s.syncStatus = t("Preparing… (the speakers reconnect)", "準備中…（喇叭會重新連線）")
+        func finish(_ adj: Int, _ message: String, detail: String = "") {
             macVolume = volume
             let saved = writeSetting(syncFile, String(adj))
             try? FileManager.default.removeItem(at: alignRestoreFile)
             s.sync = saved ? adj : probe
             s.appliedSync = s.sync
             s.aligning = false
-            s.alignStatus = saved ? message : t("Couldn't save the offset. Set it by hand.", "無法寫入對齊值，請手動設定。")
-            let line = "\(Date()) before=\(before) result=\(adj) \(message)\n"
+            s.syncStatus = saved ? message : t("Couldn't save the offset. Set it by hand.", "無法寫入對齊值，請手動設定。")
+            let line = "\(Date()) before=\(before) result=\(adj) \(detail) \(message)\n"
             let url = wantFile.deletingLastPathComponent().appendingPathComponent("align.log")
             if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
             else { try? line.write(to: url, atomically: true, encoding: .utf8) }
@@ -410,7 +430,7 @@ final class App: NSObject, NSApplicationDelegate {
                 guard s.aligning else { return }  // quit already restored everything
                 guard ready else { finish(before, t("Couldn't restart the stream. Nothing changed.", "串流沒有重新連上，對齊值沒有改。")); return }
                 guard self.actual == outputs, self.pending == nil else { finish(before, changed); return }
-                s.alignStatus = t("Listening… keep the room quiet (about 20 s)", "錄音中，請保持安靜（約 20 秒）")
+                s.syncStatus = t("Listening… keep the room quiet (about 20 s)", "錄音中，請保持安靜（約 20 秒）")
                 macVolume = 0.12  // so the speakers beside the mic don't drown the HomePods out
                 self.aligner.record { samples, fs in
                     macVolume = volume
@@ -427,8 +447,8 @@ final class App: NSObject, NSApplicationDelegate {
                             }
                             let adj = max(-100, min(100, Int((Double(probe) - r.gap).rounded())))
                             let spread = String(format: "%.1f", r.spread)
-                            finish(adj, t("Done: offset \(adj) ms (\(r.n) chirps, spread \(spread) ms)",
-                                          "完成：對齊值 \(adj) ms（\(r.n) 筆，離散 \(spread) ms）"))
+                            finish(adj, t("Done. Offset set to \(adj) ms.", "完成，時間差設為 \(adj) ms。"),
+                                   detail: "chirps=\(r.n) spread_ms=\(spread)")
                         }
                     }
                 }
@@ -586,5 +606,21 @@ enum Entry {
         app.delegate = delegate
         app.setActivationPolicy(.accessory)  // menu bar only, no Dock icon
         app.run()
+    }
+}
+
+/// Settings with Audio and General panes in the toolbar. The window title follows the pane and the last pane reopens.
+final class SettingsTabs: NSTabViewController {
+    static let key = "settingsPane"
+    func label() {
+        for (tab, name) in zip(tabViewItems, [t("Audio", "音訊"), t("General", "一般")]) {
+            tab.label = name
+            tab.viewController?.title = name
+        }
+        if tabViewItems.indices.contains(selectedTabViewItemIndex) { view.window?.title = tabViewItems[selectedTabViewItemIndex].label }
+    }
+    override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
+        super.tabView(tabView, didSelect: item)
+        UserDefaults.standard.set(selectedTabViewItemIndex, forKey: Self.key)
     }
 }

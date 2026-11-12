@@ -26,30 +26,40 @@ func writeSetting(_ url: URL, _ text: String) -> Bool {
 final class SettingsModel: ObservableObject {
     // The service reads both files when it (re)starts the stream and restarts on change
     @Published var left = readSetting(leftFile)  // a speaker id; the service falls back to the first of the pair
-    @Published var pair: [String] = []  // the two speakers playing as a stereo pair, sorted by id
+    @Published var playing: [String] = []  // speakers playing now (not the Mac), sorted by id
+    @Published var switching = false  // outputs picked in the menu, the service isn't there yet
     @Published var names: [String: String] = [:]
-    @Published var sync = Int(readSetting(syncFile)) ?? 0
-    @Published var appliedSync = Int(readSetting(syncFile)) ?? 0
-    @Published var pairPlaying = false
+    @Published var sync = Int(readSetting(syncFile)) ?? 0 {  // what the field shows
+        didSet {
+            if sync != max(-100, min(100, sync)) { sync = max(-100, min(100, sync)) }
+            if sync != appliedSync, !aligning { syncStatus = "" }  // "Saved" or "Done" is about the old value
+        }
+    }
+    @Published var appliedSync = Int(readSetting(syncFile)) ?? 0  // what's saved for the service
     @Published var canAlign = false  // the Mac and at least one HomePod are playing
     @Published var aligning = false
-    @Published var alignStatus = ""
-    @Published var service = ""  // status line 1: "missing", "noservice", or on/off
+    @Published var syncStatus = ""
     @Published var helper = "ok"  // "missing", "outdated", "stopped", "ok"
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
     var onLangChange: () -> Void = {}
+    var pair: [String] { playing.count == 2 ? playing : [] }
+    var pairReady: Bool { pair.count == 2 && !switching }
     var leftID: String { pair.contains(left) ? left : pair.first ?? "" }
     var rightID: String { pair.first { $0 != leftID } ?? "" }
-    func name(_ id: String) -> String { names[id] ?? (id.isEmpty ? "—" : id) }
+    func name(_ id: String) -> String { names[id] ?? id }
 
     func swap() {
         let r = rightID
         if !r.isEmpty, writeSetting(leftFile, r) { left = r }
     }
     func applySync() {
-        if writeSetting(syncFile, String(sync)) { appliedSync = sync }
+        if writeSetting(syncFile, String(sync)) {
+            appliedSync = sync
+            syncStatus = t("Saved. The speakers reconnect for a few seconds.", "已儲存，喇叭會重新連線幾秒。")
+        }
     }
+    func revertSync() { sync = appliedSync }
 }
 
 /// Plays a soft chime on the left channel, then a higher one on the right, through the normal system
@@ -74,14 +84,6 @@ final class ChannelTest {
             }
             pcm[i] = Int16(max(-1, min(1, x * 0.22)) * 32767)
         }
-        var d = Data()
-        func put<T>(_ v: T) { withUnsafeBytes(of: v) { d.append(contentsOf: $0) } }
-        d.append(contentsOf: Array("RIFF".utf8)); put(UInt32(36 + n * 2).littleEndian)
-        d.append(contentsOf: Array("WAVEfmt ".utf8)); put(UInt32(16).littleEndian)
-        put(UInt16(1).littleEndian); put(UInt16(1).littleEndian)
-        put(UInt32(fs).littleEndian); put(UInt32(fs * 2).littleEndian)
-        put(UInt16(2).littleEndian); put(UInt16(16).littleEndian)
-        d.append(contentsOf: Array("data".utf8)); put(UInt32(n * 2).littleEndian)
         return wav(pcm, fs: fs)
     }
 
@@ -99,95 +101,225 @@ final class ChannelTest {
         return d
     }
 
-    func play() {
-        // A major, rising: left A4 + C#5, then right E5 + G#5, so "left, then right" also sounds like it goes somewhere
-        players = [[440.0, 554.37], [659.26, 830.61]].compactMap { try? AVAudioPlayer(data: Self.chime($0)) }
-        guard players.count == 2 else { NSSound.beep(); return }
-        players[0].pan = -1
-        players[1].pan = 1
-        players[0].play()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.players[1].play() }
+    /// One channel: left is A4 + C#5, right a third higher (E5 + G#5), so the two sides also sound different.
+    func play(right: Bool) {
+        guard let p = try? AVAudioPlayer(data: Self.chime(right ? [659.26, 830.61] : [440.0, 554.37])) else { NSSound.beep(); return }
+        p.pan = right ? 1 : -1
+        players = [p]
+        p.play()
     }
 }
 
-struct SettingsView: View {
+/// The two Settings panes. Audio is what people come for; General holds the rarely touched upkeep.
+struct AudioPane: View {
     @ObservedObject var model: SettingsModel
-    let playTest: () -> Void
+    let playChannel: (_ right: Bool) -> Void
     let autoAlign: () -> Void
-    let openLogs: () -> Void
-    let copyDiagnostics: () -> Void
     let installHelper: () -> Void
-    let uninstallHelper: () -> Void
+    let openMenu: () -> Void
 
     var body: some View {
         let _ = model.lang  // t() reads the global language; this makes the view redraw when it changes
         Form {
+            if model.helper != "ok" {
+                Section { HelperProblem(model: model, install: installHelper) }
+            }
             Section {
-                LabeledContent(t("Left channel", "左聲道"), value: model.name(model.leftID))
-                LabeledContent(t("Right channel", "右聲道"), value: model.name(model.rightID))
-                HStack {
-                    Button(t("Play Test Sound", "播放測試音"), action: playTest).disabled(!model.pairPlaying)
-                    Button(t("Swap Left and Right", "交換左右"), action: model.swap).disabled(model.pair.count != 2)
+                if model.pair.count == 2 {
+                    pairDiagram
+                } else {
+                    LabeledContent {
+                        Button(t("Show Speakers", "打開喇叭選單"), action: openMenu)
+                    } label: {
+                        Text(model.switching ? t("Switching speakers…", "正在切換喇叭…")
+                             : model.playing.count == 1
+                             ? t("Playing on \(model.name(model.playing[0])) only", "目前只播 \(model.name(model.playing[0]))")
+                             : t("No speakers selected", "還沒選喇叭"))
+                        Text(t("Select two speakers to play left and right.", "勾選兩台喇叭，就能分左右聲道。"))
+                    }
                 }
             } header: {
                 Text(t("Stereo Pair", "左右聲道"))
             } footer: {
-                Text(model.pairPlaying
-                     ? t("A chime plays on the left channel, then a higher one on the right. If the first one doesn't come from the HomePod on your left, swap them. Swapping reconnects the speakers for a few seconds.",
-                         "會先在左聲道響一聲，再在右聲道響一聲較高的音。如果先響的不是左邊那台，就按交換。交換時喇叭會重新連線幾秒。")
-                     : t("Select two speakers in the menu bar to set up left and right.",
-                         "在選單列勾選兩台喇叭，才能設定左右聲道。"))
-                    .foregroundStyle(.secondary)
+                if model.pair.count == 2 {
+                    Text(model.switching ? t("The speakers are reconnecting.", "喇叭重新連線中。")
+                         : t("Click a speaker to hear a chime from it. If it comes from the wrong side, swap them; the speakers reconnect for a few seconds.",
+                             "點喇叭會從它那一邊響一聲。方向不對就按中間交換，喇叭會重新連線幾秒。"))
+                        .foregroundStyle(.secondary)
+                }
             }
             Section {
-                Stepper(value: $model.sync, in: -100...100) {
-                    LabeledContent(t("Offset", "對齊微調"), value: "\(model.sync) ms")
+                LabeledContent(t("Offset", "時間差")) {
+                    HStack(spacing: 4) {
+                        TextField(t("Offset", "時間差"), value: $model.sync, format: .number)
+                            .labelsHidden().multilineTextAlignment(.trailing).frame(width: 52)
+                        Text("ms").foregroundStyle(.secondary)
+                        Stepper(t("Offset", "時間差"), value: $model.sync, in: -100...100).labelsHidden()
+                    }
+                    .disabled(model.aligning)  // auto-align writes this value when it finishes
                 }
-                HStack {
-                    Button(t("Apply", "套用")) { model.applySync() }.disabled(model.sync == model.appliedSync || model.aligning)
-                    Button(t("Align Automatically", "自動對齊"), action: autoAlign).disabled(!model.canAlign || model.aligning)
+                if model.sync != model.appliedSync {
+                    LabeledContent {
+                        HStack {
+                            Button(t("Revert", "還原"), action: model.revertSync)
+                            Button(t("Apply", "套用")) {
+                                // a click doesn't take focus, so the field may still hold typed text: commit it first
+                                NSApp.keyWindow?.makeFirstResponder(nil)
+                                DispatchQueue.main.async { model.applySync() }
+                            }
+                            .keyboardShortcut(.defaultAction)
+                        }
+                        .disabled(model.aligning)  // a write now would restart the stream mid-measurement
+                    } label: {
+                        Text(t("Not applied", "尚未套用"))
+                        Text(t("The speakers reconnect for a few seconds.", "套用時喇叭會重新連線幾秒。"))
+                    }
                 }
-                if !model.alignStatus.isEmpty {
-                    Text(model.alignStatus).foregroundStyle(.secondary)
+                LabeledContent {
+                    Button(t("Align Automatically…", "自動對齊…"), action: autoAlign)
+                        .disabled(!model.canAlign || model.aligning)
+                } label: {
+                    Text(t("Hear an echo?", "聽到回音？"))
+                    Text(model.canAlign || model.aligning
+                         ? t("Uses the microphone for about a minute. Keep the room quiet.", "會用麥克風錄約一分鐘，請保持安靜。")
+                         : t("Select This Mac and a HomePod to use it.", "要同時勾選這台 Mac 和一台 HomePod 才能用。"))
+                }
+                if !model.syncStatus.isEmpty {
+                    HStack(spacing: 6) {
+                        if model.aligning { ProgressView().controlSize(.small) }
+                        Text(model.syncStatus).foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 Text(t("This Mac's Speakers", "這台 Mac 的喇叭"))
             } footer: {
-                Text(t("Auto-align uses the microphone for about a minute: keep the room quiet. It needs this Mac and a HomePod both selected. You can also adjust by hand: negative plays the Mac earlier. Either way the speakers reconnect for a few seconds.",
-                       "自動對齊會用麥克風錄約一分鐘，請保持安靜，而且要同時勾選這台 Mac 和 HomePod。也可以手動調整，負數讓 Mac 提早。兩種方式喇叭都會重新連線幾秒。"))
+                Text(model.sync == 0 ? t("The Mac plays together with the HomePods.", "Mac 和 HomePod 同時播。")
+                     : model.sync < 0 ? t("The Mac plays \(-model.sync) ms earlier than the HomePods.", "Mac 比 HomePod 早 \(-model.sync) ms 播。")
+                     : t("The Mac plays \(model.sync) ms later than the HomePods.", "Mac 比 HomePod 晚 \(model.sync) ms 播。"))
                     .foregroundStyle(.secondary)
             }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Like the Home app's stereo pair screen: the left speaker on the left, the right one on the right.
+    private var pairDiagram: some View {
+        HStack(spacing: 20) {
+            speaker(model.leftID, right: false)
+            Button(action: model.swap) {
+                Image(systemName: "arrow.left.arrow.right").font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.quaternary))
+            }
+            .buttonStyle(.plain)
+            .help(t("Swap Left and Right", "交換左右"))
+            .accessibilityLabel(t("Swap Left and Right", "交換左右"))
+            speaker(model.rightID, right: true)
+        }
+        .disabled(!model.pairReady)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func speaker(_ id: String, right: Bool) -> some View {
+        Button { playChannel(right) } label: {
+            VStack(spacing: 6) {
+                Image(systemName: "homepodmini.fill").font(.system(size: 26))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 64, height: 64)
+                    .background(Circle().fill(Color.accentColor.opacity(0.12)))
+                Text(model.name(id)).lineLimit(1).truncationMode(.middle)
+                Text(right ? t("Right", "右") : t("Left", "左")).font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(width: 130)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(t("Play a chime on this side", "在這一邊響一聲"))
+        .accessibilityLabel((right ? t("Right: ", "右聲道：") : t("Left: ", "左聲道：")) + model.name(id))
+        .accessibilityHint(t("Plays a chime", "播放測試音"))
+    }
+}
+
+/// Shown on the Audio pane too: nothing plays until the helper is fixed, so it can't hide on the other pane.
+struct HelperProblem: View {
+    @ObservedObject var model: SettingsModel
+    let install: () -> Void
+    var body: some View {
+        LabeledContent {
+            Button(model.helper == "missing" ? t("Install…", "安裝…")
+                   : model.helper == "outdated" ? t("Update…", "更新…") : t("Reinstall…", "重新安裝…"), action: install)
+                .disabled(model.helperBusy)
+        } label: {
+            Label(model.helper == "missing" ? t("Background helper isn't installed", "背景服務還沒安裝")
+                  : model.helper == "outdated" ? t("Background helper update available", "背景服務有新版本")
+                  : t("Background helper stopped", "背景服務停止了"),
+                  systemImage: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+            Text(t("Speakers can't play until it's fixed. Needs your administrator password.", "修好之前喇叭不會出聲，需要管理員密碼。"))
+        }
+    }
+}
+
+struct GeneralPane: View {
+    @ObservedObject var model: SettingsModel
+    let openLogs: () -> Void
+    let copyDiagnostics: () -> Void
+    let installHelper: () -> Void
+    let uninstallHelper: () -> Void
+    @State private var showDetails = false
+
+    var body: some View {
+        let _ = model.lang
+        Form {
             Section {
                 Picker(t("Language", "語言"), selection: $model.lang) {
                     Text(t("Follow System", "跟隨系統")).tag(Lang.system)
                     Text("English").tag(Lang.en)
                     Text("中文").tag(Lang.zh)
                 }
-                LabeledContent(t("Background helper", "背景服務")) {
-                    HStack {
-                        Text(model.helper == "missing" ? t("Not installed", "未安裝")
-                             : model.helper == "outdated" ? t("Differs from this app", "和這個 App 的版本不同")
-                             : model.helper == "stopped" ? t("Not running", "沒在跑") : t("Running", "執行中"))
-                            .foregroundStyle(.secondary)
-                        Button(model.helper == "missing" ? t("Install", "安裝")
-                               : model.helper == "outdated" ? t("Update", "更新") : t("Reinstall", "重新安裝"),
-                               action: installHelper)
-                            .disabled(model.helperBusy)
-                        if model.helper != "missing" {
-                            Button(t("Remove", "移除"), action: uninstallHelper).disabled(model.helperBusy)
+            }
+            Section {
+                if model.helper == "ok" {
+                    LabeledContent {
+                        Menu(t("Manage", "管理")) {
+                            Button(t("Reinstall…", "重新安裝…"), action: installHelper)
+                            Button(t("Remove…", "移除…"), role: .destructive, action: uninstallHelper)
+                        }
+                        .fixedSize()
+                        .disabled(model.helperBusy)
+                    } label: {
+                        Text(t("Background helper", "背景服務"))
+                        Text(t("Running", "執行中"))
+                    }
+                } else {
+                    HelperProblem(model: model, install: installHelper)
+                    if model.helper != "missing" {
+                        LabeledContent(t("Remove the helper", "移除背景服務")) {
+                            Button(t("Remove…", "移除…"), action: uninstallHelper).disabled(model.helperBusy)
                         }
                     }
                 }
+            } footer: {
+                Text(t("It streams the Mac's sound to the speakers. Installing, updating, and removing it need your administrator password.",
+                       "負責把 Mac 的聲音送到喇叭。安裝、更新、移除都要輸入管理員密碼。"))
+                    .foregroundStyle(.secondary)
+            }
+            Section {
                 HStack {
                     Button(t("Open Log Folder", "打開 log 資料夾"), action: openLogs)
                     Button(t("Copy Diagnostics", "複製診斷資訊"), action: copyDiagnostics)
                 }
+                DisclosureGroup(t("What's in the diagnostics", "診斷資訊包含什麼"), isExpanded: $showDetails) {
+                    Text(t("Plain text for reporting a problem: recent sessions and events. IP addresses, device IDs, host names, and the names of speakers found now are replaced by placeholders. Check it once more before sending.",
+                           "回報問題用的純文字：最近幾段播放與事件。IP、裝置 ID、主機名稱、目前找到的喇叭名稱會換成代號，送出前請自己再看一次。"))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } header: {
-                Text(t("General", "一般"))
-            } footer: {
-                Text(t("Diagnostics are plain text for reporting a problem: recent sessions and events. IP addresses, device IDs, host names, and the names of speakers found now are replaced by placeholders; check it once more before sending.",
-                       "診斷資訊是回報問題用的純文字：最近幾段播放與事件。IP、裝置 ID、主機名稱、目前找到的喇叭名稱會換成代號，送出前請自己再看一次。"))
-                    .foregroundStyle(.secondary)
+                Text(t("Troubleshooting", "疑難排解"))
             }
         }
         .formStyle(.grouped)
