@@ -15,7 +15,7 @@ rr() { zsh $HERE/../stereo.sh reroute "$@" }
 
 zsh -c 'sleep 600; :' stereo.sh supervise > /dev/null 2>&1 & pids+=($!)  # running 看的是命令列有「stereo.sh supervise」
 print $! > $STATE/supervisor.pid; print -r -- $RD > $STATE/rundir
-touch $RD/ready; mkfifo $RD/pcm-Mac $RD/cmd-$A $RD/cmd-$B
+touch $RD/ready; mkfifo $RD/pcm-Mac $RD/pcm-$A $RD/pcm-$B $RD/cmd-$A $RD/cmd-$B
 for d in $A $B; do cat <> $RD/cmd-$d > $S/got-$d & pids+=($!); done
 sleep 0.3
 setdev() { print -r -- $1 > $STATE/devices; rm -f $RD/routes }
@@ -41,7 +41,8 @@ eq "$(cat $S/got-$A)" "" "A 沒收到任何指令"
 grep -q "reroute: $A $B -> $A" $LOGDIR/stereo.log || fail "沒有 log 一行"
 
 rr $A Mac || fail "剩一台再開 Mac"
-eq "$(snap)" "$A Mac | $RD/pcm-$A:LR $RD/pcm-Mac:LR" "剩一台加 Mac（B 已不在 DEVFILE，不再列 X）"
+eq "$(snap)" "$A Mac | $RD/pcm-$A:LR $RD/pcm-$B:X $RD/pcm-Mac:LR" "移除 B 後再開 Mac，B:X 仍在（表完整）"
+sleep 0.3; eq "$(cat $S/got-$B)" "ACTION=DISCONNECT" "B 沒有被重送 DISCONNECT"
 unchanged "加喇叭" $A $B
 unchanged "只有 Mac（空集合）" Mac
 unchanged "沒有裝置" 

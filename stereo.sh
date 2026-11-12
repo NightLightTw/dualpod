@@ -254,7 +254,8 @@ case ${1:-status} in
     [[ -n $r && ${LEFT:-} == $r ]] && l=$r r=$new[1]
     (( $#new == 2 )) && routes="$rd/pcm-$l:L $rd/pcm-$r:R" || routes="$rd/pcm-$l:LR"
     gone=(); for d in ${=cur}; do [[ $d != Mac && -z ${new[(r)$d]:-} ]] && gone+=$d; done
-    for d in $gone; do routes+=" $rd/pcm-$d:X"; done
+    # 表要完整、可重複套用：run dir 裡每個不在新組合的喇叭 FIFO 都標 X。split 若漏讀一版，下一版仍叫它丟棄，FIFO 才不會填滿卡住全部輸出
+    for f in $rd/pcm-[0-9A-F](#c12)(Np); do [[ -z ${new[(r)${f:t:s/pcm-//}]:-} ]] && routes+=" $f:X"; done
     routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)"
     print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
     now="$new${mac:+ Mac}"
