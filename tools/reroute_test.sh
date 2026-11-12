@@ -21,10 +21,14 @@ touch $RD/ready; mkfifo $RD/pcm-Mac $RD/pcm-$A $RD/pcm-$B $RD/cmd-$A $RD/cmd-$B
 for d in $A $B; do cat <> $RD/cmd-$d > $S/got-$d & pids+=($!); done
 sleep 0.3
 zmodload zsh/datetime
-# 假的 split：routes 一出現就（延遲 ackdelay 秒後）原樣複製成 routes.applied；有 noack 檔就不回報
+# 假的 split：routes 一出現就（延遲 ackdelay 秒後）原樣複製成 routes.applied；有 noack 檔就不回報。
+# 排程（@T）到了 T 才寫 routes.active，沒有 @ 的馬上寫；有 noactive 檔就不寫（tool、off 檔在加入測試前才有，沒 @ 的用不到）
 zsh -c 'cd $0; while :; do
   if [[ ! -e noack && -f $1/routes ]] && ! cmp -s $1/routes $1/routes.applied; then
     sleep $(cat ackdelay 2>/dev/null || echo 0); cp $1/routes $1/routes.ack.tmp && mv -f $1/routes.ack.tmp $1/routes.applied
+    t=${${(M)${(z)$(cat $1/routes)}:#*@<->}[1]##*@}
+    [[ -n $t ]] && $(cat $0/tool) sleepuntil $t $(cat $0/off)
+    [[ -e noactive ]] || { cp $1/routes $1/routes.act.tmp && mv -f $1/routes.act.tmp $1/routes.active; }
   fi; sleep 0.01; done' $S $RD > /dev/null 2>&1 & pids+=($!)
 print 0.4 > $S/ackdelay
 setdev() { print -r -- $1 > $STATE/devices; rm -f $RD/routes }
@@ -63,7 +67,7 @@ TOOL=$HERE/stereotool
 print -r -- "$A"$'\t'"127.0.0.1"$'\t'"a"$'\n'"$B"$'\t'"127.0.0.1"$'\t'"b" > $STATE/speakers
 print "model=fake" > $STATE/txt-$B
 OFF=$($TOOL offset); nowms() { $TOOL now $OFF }
-print $OFF > $RD/clock_offset; print 200 > $RD/latency; print teststamp > $RD/stamp; print $(( $(nowms) - 5000 )) > $RD/start_ms
+print $TOOL > $S/tool; print $OFF > $S/off; print $OFF > $RD/clock_offset; print 200 > $RD/latency; print teststamp > $RD/stamp; print $(( $(nowms) - 5000 )) > $RD/start_ms
 cat > $S/fakeclient <<'FAKE'
 #!/bin/zsh
 while (( $# )); do case $1 in --clock-offset-ns) off=$2 ;; --cmdpipe) cp=$2 ;; esac; shift; done
@@ -96,6 +100,7 @@ T2=$(sed -n 's/.*:L@\([0-9]*\) .*/\1/p' $RD/routes)
 eq "$(snap)" "$A $B | $RD/pcm-$A:L@$T2 $RD/pcm-$B.1:R@$T2 $RD/pcm-$B:X $RD/pcm-Mac:0@$T2" "加入：每個留下的輸出都在 T2 切換，B 用新的一代"
 (( T2 >= t0 + 600 && T2 >= $(ready_at) && T2 <= t1 )) || fail "T2=$T2 要不早於 ready_at、比決定時晚 600 ms，且 reroute 等到 T2 才回來（$t0..$t1）"
 eq "$(cat $S/fake.got)" "START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" "B 收到 START 三行"
+eq "$(cat $RD/routes.active)" "$(cat $RD/routes)" "reroute 回來時 .active 已在"
 eq "$(cat $RD/cur-$B)" ".1" "記下 B 目前這一代"
 alive || fail "加入成功後 B 的 client 要留著"
 eq "$(cat $S/got-$A)" "" "加入時 A 沒收到任何指令"
@@ -133,7 +138,11 @@ grep -q "ACTION=START" $S/fake.got || fail "時刻被修正那次有送 START"
 prep; print 0 > $S/skew; touch $S/noack
 joinfails "split 沒有 ack"
 grep -q START $S/fake.got && fail "split 沒 ack 就不能送 START"
-rm $S/noack; prep; touch $S/noready
+rm $S/noack; prep; touch $S/noactive
+before=$(cat $STATE/devices)
+joinfails "split 收下排程但沒執行（.active 沒來）"
+grep -q "沒回報排程已執行" $LOGDIR/stereo.log || fail "沒有 log .active 逾時一行"
+rm $S/noactive; prep; touch $S/noready
 before=$(cat $RD/routes)
 joinfails "時鐘一直沒就緒"
 eq "$(cat $RD/routes)" $before "時鐘沒就緒不寫路由"

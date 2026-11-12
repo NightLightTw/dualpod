@@ -305,7 +305,7 @@ case ${1:-status} in
     # 表要完整、可重複套用：run dir 裡每個不在新組合的喇叭 FIFO（含之前幾代的）都標 X。split 若漏讀一版，下一版仍叫它丟棄，FIFO 才不會填滿卡住全部輸出
     for f in $rd/pcm-[0-9A-F](#c12)(|.<->)(Np); do [[ -z ${keep[(r)$f]:-} ]] && routes+=" $f:X"; done
     routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)$tag"
-    rm -f $rd/routes.applied  # 舊的 ack 內容可能和這版一樣，先清掉才不會誤判已套用
+    rm -f $rd/routes.applied $rd/routes.active  # 舊的 ack 內容可能和這版一樣，先清掉才不會誤判已套用
     print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
     # 先等 split 回報已套用（它才會關掉被移除的輸出）再斷開：斷開後讀端不再讀，split 若還在寫那個 FIFO 會寫滿卡死，永遠看不到 X
     for i in {1..50}; do [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" == "$routes" ]] && break; sleep 0.02; done
@@ -322,8 +322,13 @@ case ${1:-status} in
       [[ $ack == *"requested_unix_ms=$T2 at_unix_ms=$T2"(| *) ]] || { say "reroute: $j 的 started ack 不符（要 $T2）：$ack"; exit 1; }
       same || exit 1
       print -r -- $SFX[$j] > $rd/cur-$j.tmp && mv -f $rd/cur-$j.tmp $rd/cur-$j || exit 1
-      joined=1
       $TOOL sleepuntil $T2 $off  # 排定的切換生效前不能再來一份路由（會取代還沒生效的排程）
+      # applied 只代表 split 收下排程；split 若卡過 T2，之後的路由檔會取代還沒生效的排程，新的一台就永遠沒聲音。等 split 回報排程真的執行了才算加入成功
+      while [[ "$(head -c 4096 $rd/routes.active 2>/dev/null)" != "$routes" ]]; do
+        (( $($TOOL now $off) > T2 + 1000 )) && { say "reroute: T2 後 1 秒內 split 沒回報排程已執行，退回重啟"; exit 1; }
+        sleep 0.02
+      done
+      joined=1
     fi
     now="$new${mac:+ Mac}"
     print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
