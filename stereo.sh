@@ -272,6 +272,12 @@ case ${1:-status} in
       j=$add[1]
       off=$(head -c 32 $rd/clock_offset 2>/dev/null) stamp=$(head -c 32 $rd/stamp 2>/dev/null)
       [[ $off == (|-)<-> && -n $stamp ]] || exit 1
+      # 換算 frame 用的是「要求的」起播時刻：原本那台起播時若被 cliairplay 往後修正，照這個時刻加入會固定錯開，改走重啟。
+      # 它自己也是播放中加入的話（有後綴），加入當時已經核對過
+      T=$(head -c 20 $rd/start_ms)
+      for d in $new; do
+        [[ $d == $j || -n $SFX[$d] ]] || grep -q "STATUS\] started requested_unix_ms=$T at_unix_ms=$T\( \|$\)" $LOGDIR/pair-$stamp-$d.log 2>/dev/null || exit 1
+      done
       rm -f $rd/join.out  # 上一次加入留下的 ready 行不能被當成這次的
       SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE LOGDIR=$LOGDIR DEBUG=3 zsh $RUN_PAIR join $rd $j < /dev/null > $rd/join.out 2>> $LOG &!
       jpid=$!

@@ -87,6 +87,8 @@ ready_at() { sed -n 's/.*ready_at_unix_ms=\([0-9]*\).*/\1/p' $JLOG }
 print 0 > $S/ackdelay; print 0 > $S/skew; print 300 > $S/readyin; : > $S/got-$B
 
 setdev "$A"
+unchanged "A 起播時刻沒核對到就不加入" $A $B
+print "[STATUS] started requested_unix_ms=$(cat $RD/start_ms) at_unix_ms=$(cat $RD/start_ms)" > $LOGDIR/pair-teststamp-$A.log
 t0=$(nowms)
 rr $A $B || fail "加入 B"
 t1=$(nowms)

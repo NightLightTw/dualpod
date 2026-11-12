@@ -115,8 +115,8 @@ if [[ -n $JOIN ]]; then
   n=$(( $(head -c 8 $RUN/gen-$d 2>/dev/null || true) + 1 )); print $n > $RUN/gen-$d
   # 上一代的 log 有它斷開時的 [STATUS] stopped，watchdog 會當成這一代出錯，先移開
   [[ -f $log ]] && mv -f $log $log.$(date +%H%M%S)
-  # 結束時只收自己這台，不碰整段播放。先請喇叭斷開、給它 1 秒，和整段結束時一樣
-  trap '[[ -p $RUN/cmd-$d.$n ]] && printf "ACTION=DISCONNECT\n" > $RUN/cmd-$d.$n || true; rm -f $RUN/cmd-$d.$n $RUN/pcm-$d.$n; sleep 1; kill $PIDS 2>/dev/null || true' EXIT
+  # 結束時只收自己這台，不碰整段播放。先請喇叭斷開、給它 1 秒，和整段結束時一樣。client 起來後 FIFO 才保證有讀端，之前寫會卡住
+  trap '(( $#PIDS )) && [[ -p $RUN/cmd-$d.$n ]] && printf "ACTION=DISCONNECT\n" > $RUN/cmd-$d.$n || true; rm -f $RUN/cmd-$d.$n $RUN/pcm-$d.$n; sleep 1; kill $PIDS 2>/dev/null || true' EXIT
   start_client $d $IP[$d] .$n
   for i in {1..32}; do ready $d && break; sleep 0.25; done
   ready $d || { echo "join: 8 秒內 $d 沒有 clock_ready，看 $log" >&2; exit 1; }
