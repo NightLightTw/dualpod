@@ -4,7 +4,10 @@
 //                                           NTP 調整系統時間時兩台不會一台跳、一台慢慢追
 //   stereotool now <offset>                 依上面的時鐘印出現在的 Unix ms
 //   stereotool sleepuntil <unix_ms> <offset>  睡到那個時刻
-//   stereotool split <路徑:聲道>…            stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）或 LR（原樣）
+//   stereotool split [--routes <檔>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
+//                                           0（寫靜音，時間軸照走）、X（關掉 fd，之後不再寫）
+//   --routes 檔內容是空白分隔的「路徑:聲道」，約每 100 ms 看一次有沒有變，變了就套用到已開啟的輸出（不認得的路徑略過）；
+//   整個檔格式不對就整份忽略、stderr 記一次。路由只改下一塊起寫給各 fd 的內容，樣本時間軸不動
 //
 // split 的輸出鎖在牆鐘的 44.1 kHz：process tap 在系統沒出聲時不送資料，這時補靜音，否則 cliairplay 會判定斷流、
 // 各自平移時間軸，兩台的對齊就散了。輸入比牆鐘超前太多（tap 恢復時一次湧入，或時脈漂移累積）就丟掉最舊的，延遲維持固定。
@@ -13,7 +16,7 @@ import Foundation
 
 func rawNs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) }
 func err(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
-func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | split <路徑:L|R|LR>…"); exit(2) }
+func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | split [--routes <檔>] <路徑:L|R|LR|0|X>…"); exit(2) }
 
 let args = CommandLine.arguments
 guard args.count >= 2 else { usage() }
@@ -41,25 +44,39 @@ default:
     usage()
 }
 
-func split(_ specs: [String]) {
+func split(_ argv: [String]) {
+    var specs = argv
+    var routesFile: String?
+    if specs.first == "--routes" {
+        guard specs.count >= 2 else { usage() }
+        routesFile = specs[1]
+        specs.removeFirst(2)
+    }
     let fs = 44100.0
     let idle = Int(0.080 * fs)      // 輸入落後超過 80 ms 才當成斷流補靜音；一般抖動（±20 ms）不動作
     let maxAhead = Int(0.060 * fs)  // 輸入比基準超前 60 ms 以上就丟
-    enum Mode { case left, right, both }
-    var outputs: [(fd: Int32, mode: Mode)] = []
-    for spec in specs {
-        guard let colon = spec.lastIndex(of: ":") else { err("split: 不認得的輸出 \(spec)"); exit(2) }
-        let path = String(spec[..<colon])
-        let mode: Mode
-        switch spec[spec.index(after: colon)...] {
-        case "L": mode = .left
-        case "R": mode = .right
-        case "LR": mode = .both
-        default: err("split: 不認得的聲道 \(spec)"); exit(2)
+    enum Mode { case left, right, both, zero, closed }
+    func parseMode(_ m: Substring) -> Mode? {
+        switch m {
+        case "L": return .left
+        case "R": return .right
+        case "LR": return .both
+        case "0": return .zero
+        case "X": return .closed
+        default: return nil
         }
+    }
+    func parseSpec(_ spec: Substring) -> (path: String, mode: Mode)? {
+        guard let colon = spec.lastIndex(of: ":"), let mode = parseMode(spec[spec.index(after: colon)...]) else { return nil }
+        return (String(spec[..<colon]), mode)
+    }
+    var outputs: [(path: String, fd: Int32, mode: Mode)] = []
+    for spec in specs {
+        guard let (path, mode) = parseSpec(Substring(spec)) else { err("split: 不認得的輸出 \(spec)"); exit(2) }
+        if mode == .closed { outputs.append((path, -1, .closed)); continue }
         let fd = open(path, O_WRONLY)
         guard fd >= 0 else { err("split: 開不了 \(path)"); exit(1) }
-        outputs.append((fd, mode))
+        outputs.append((path, fd, mode))
     }
     guard !outputs.isEmpty else { usage() }
     signal(SIGPIPE, SIG_IGN)
@@ -74,12 +91,42 @@ func split(_ specs: [String]) {
     }
     var dup: [Int16] = []
     func emit(_ pcm: UnsafeBufferPointer<Int16>) {  // pcm：交錯的 L, R
-        for (fd, mode) in outputs {
+        for (_, fd, mode) in outputs {
+            if mode == .closed { continue }
             if mode == .both { writeAll(fd, pcm.baseAddress!, pcm.count * 2); continue }
+            if mode == .zero {
+                dup.removeAll(keepingCapacity: true)
+                dup.append(contentsOf: repeatElement(0, count: pcm.count))
+                dup.withUnsafeBytes { writeAll(fd, $0.baseAddress!, $0.count) }
+                continue
+            }
             let off = mode == .left ? 0 : 1
             dup.removeAll(keepingCapacity: true)
             for i in stride(from: 0, to: pcm.count - 1, by: 2) { dup.append(pcm[i + off]); dup.append(pcm[i + off]) }
             dup.withUnsafeBytes { writeAll(fd, $0.baseAddress!, $0.count) }
+        }
+    }
+
+    // 路由檔用 mtime（奈秒）加 inode 判斷有沒有換：寫入端是 tmp＋mv，inode 會變
+    var routesSig = "", lastPoll: Int64 = 0
+    func pollRoutes(_ now: Int64) {
+        guard let file = routesFile, now - lastPoll >= 100_000_000 else { return }
+        lastPoll = now
+        var st = stat()
+        guard stat(file, &st) == 0 else { return }
+        let sig = "\(st.st_mtimespec.tv_sec).\(st.st_mtimespec.tv_nsec) \(st.st_ino)"
+        guard sig != routesSig else { return }
+        routesSig = sig
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return }
+        var table: [(String, Mode)] = []
+        for tok in text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" }) {
+            guard let (path, mode) = parseSpec(tok) else { err("split: 路由檔格式不對，整份忽略（\(tok)）"); return }
+            table.append((path, mode))
+        }
+        for (path, mode) in table {
+            guard let i = outputs.firstIndex(where: { $0.path == path }), outputs[i].mode != .closed else { continue }
+            if mode == .closed { close(outputs[i].fd); outputs[i].fd = -1 }
+            outputs[i].mode = mode
         }
     }
 
@@ -98,7 +145,9 @@ func split(_ specs: [String]) {
         let n = buf.withUnsafeMutableBytes { read(0, $0.baseAddress!, $0.count) }
         if n == 0 { break }  // 上游結束
         if n > 0 { pending.append(contentsOf: buf[0..<n]) }
-        let elapsed = Double(rawNs() - t0) / 1e9
+        let nowNs = rawNs()
+        pollRoutes(nowNs)
+        let elapsed = Double(nowNs - t0) / 1e9
         let due = Int(elapsed * fs)  // 照牆鐘此刻應該輸出到第幾個 frame
         let frames = pending.count / 4
         if frames > 0 {
