@@ -405,8 +405,8 @@ final class App: NSObject, NSApplicationDelegate {
             macVolume = volume
             let saved = writeSetting(syncFile, String(adj))
             try? FileManager.default.removeItem(at: alignRestoreFile)
-            s.sync = saved ? adj : probe
-            s.appliedSync = s.sync
+            s.appliedSync = saved ? adj : probe  // what the file holds; the probe can be past the field's ±100
+            s.sync = s.appliedSync
             s.aligning = false
             s.syncStatus = saved ? message : t("Couldn't save the offset. Set it by hand.", "無法寫入對齊值，請手動設定。")
             let line = "\(Date()) before=\(before) result=\(adj) \(detail) \(message)\n"
@@ -462,8 +462,8 @@ final class App: NSObject, NSApplicationDelegate {
         guard parts.count == 2, let adj = Int(parts[0]), let vol = Float(parts[1]) else { return }
         macVolume = vol
         writeSetting(syncFile, String(adj))
-        settings.sync = adj
         settings.appliedSync = adj
+        settings.sync = adj
         settings.aligning = false
         try? FileManager.default.removeItem(at: alignRestoreFile)
     }

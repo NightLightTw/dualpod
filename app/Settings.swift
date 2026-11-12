@@ -258,7 +258,9 @@ struct HelperProblem: View {
                   : t("Background helper stopped", "背景服務停止了"),
                   systemImage: "exclamationmark.triangle.fill")
                 .symbolRenderingMode(.multicolor)
-            Text(t("Speakers can't play until it's fixed. Needs your administrator password.", "修好之前喇叭不會出聲，需要管理員密碼。"))
+            Text(model.helper == "outdated"
+                 ? t("It may still play. Update to get this version's fixes. Needs your administrator password.", "可能還能播放，更新後才有這一版的修正。需要管理員密碼。")
+                 : t("Speakers can't play until it's fixed. Needs your administrator password.", "修好之前喇叭不會出聲，需要管理員密碼。"))
         }
     }
 }
