@@ -88,6 +88,7 @@ export FAKE_BIN=$S/fakeclient FAKE_DIR=$S FAKE_TOOL=$TOOL MY_IP=127.0.0.1
 JLOG=$LOGDIR/pair-teststamp-$B.log
 alive() { kill -0 $(cat $S/fake.pid) 2>/dev/null }
 ready_at() { sed -n 's/.*ready_at_unix_ms=\([0-9]*\).*/\1/p' $JLOG }
+print -r -- "$B=0" > $STATE/volumes
 print 0 > $S/ackdelay; print 0 > $S/skew; print 300 > $S/readyin; : > $S/got-$B
 
 setdev "$A"
@@ -99,7 +100,7 @@ t1=$(nowms)
 T2=$(sed -n 's/.*:L@\([0-9]*\) .*/\1/p' $RD/routes)
 eq "$(snap)" "$A $B | $RD/pcm-$A:L@$T2 $RD/pcm-$B.1:R@$T2 $RD/pcm-$B:X $RD/pcm-Mac:0@$T2" "加入：每個留下的輸出都在 T2 切換，B 用新的一代"
 (( T2 >= t0 + 600 && T2 >= $(ready_at) && T2 <= t1 )) || fail "T2=$T2 要不早於 ready_at、比決定時晚 600 ms，且 reroute 等到 T2 才回來（$t0..$t1）"
-eq "$(cat $S/fake.got)" "START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" "B 收到 START 三行"
+eq "$(cat $S/fake.got)" "VOLUME=0"$'\n'"START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" "B 先收到存成 0 的 VOLUME，再收到 START 三行"
 eq "$(cat $RD/routes.active)" "$(cat $RD/routes)" "reroute 回來時 .active 已在"
 eq "$(cat $RD/cur-$B)" ".1" "記下 B 目前這一代"
 alive || fail "加入成功後 B 的 client 要留著"

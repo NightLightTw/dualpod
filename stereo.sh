@@ -315,6 +315,10 @@ case ${1:-status} in
     same() { [[ "$(head -c 256 $RUNDIR_FILE 2>/dev/null)" == $rd ]] && running }
     same || exit 1
     if [[ -n $j ]]; then
+      # 存成 0 的音量 cliairplay 起播時不送（只在 > 0 才設），要在 START 前先補，否則加入的那台會以接收器上次的音量先響一下
+      for kv in $(<$VOLFILE 2>/dev/null); do
+        [[ ${kv%%=*} == $j && ${kv%%=*} == [0-9A-F](#c12) && ${kv#*=} == <0-100> ]] && { send_cmd $rd/cmd-$j$SFX[$j] "VOLUME=${kv#*=}" || exit 1; }
+      done
       # 新的一台用同一個 T2 起播。START_JOIN：這是接到已經在走的時間軸上。ack 的時刻和要求的不一樣就是它被往後修正，左右會錯開，當失敗
       send_cmd $rd/cmd-$j$SFX[$j] "START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" || exit 1
       ack=
