@@ -264,7 +264,11 @@ case ${1:-status} in
     # 表要完整、可重複套用：run dir 裡每個不在新組合的喇叭 FIFO 都標 X。split 若漏讀一版，下一版仍叫它丟棄，FIFO 才不會填滿卡住全部輸出
     for f in $rd/pcm-[0-9A-F](#c12)(Np); do [[ -z ${new[(r)${f:t:s/pcm-//}]:-} ]] && routes+=" $f:X"; done
     routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)"
+    rm -f $rd/routes.applied  # 舊的 ack 內容可能和這版一樣，先清掉才不會誤判已套用
     print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
+    # 先等 split 回報已套用（它才會關掉被移除的輸出）再斷開：斷開後讀端不再讀，split 若還在寫那個 FIFO 會寫滿卡死，永遠看不到 X
+    for i in {1..50}; do [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" == "$routes" ]] && break; sleep 0.02; done
+    (( i == 50 )) && [[ "$(head -c 4096 $rd/routes.applied 2>/dev/null)" != "$routes" ]] && say "reroute: 1 秒內沒收到 split 的 ack，仍送出 DISCONNECT（交給 watchdog）"
     now="$new${mac:+ Mac}"
     print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
     for d in $gone; do send_cmd $rd/cmd-$d 'ACTION=DISCONNECT'; done
