@@ -121,6 +121,12 @@ func split(_ argv: [String]) {
 
     var written = 0                 // 已輸出的 frame 數；基準線＝牆鐘，tap 在系統靜音時（包括剛啟動）完全不送資料，所以一開始就要補
     var scheduled: [(frame: Int, path: String, mode: Mode, fd: Int32)] = []  // fd：新輸出預先開好的，既有輸出是 -1
+    var activeText: String?         // 已收下、排程還沒全部執行的路由檔內容；執行完才回報 .active
+    func markActive() {
+        guard scheduled.isEmpty, let t = activeText, let file = routesFile else { return }
+        activeText = nil
+        try? t.write(toFile: file + ".active", atomically: true, encoding: .utf8)
+    }
     func setMode(_ path: String, _ mode: Mode, newFd: Int32) {
         guard let i = outputs.firstIndex(where: { $0.path == path }) else {
             if newFd >= 0 { outputs.append((path, newFd, mode)) }
@@ -137,6 +143,7 @@ func split(_ argv: [String]) {
         while true {
             for s in scheduled where s.frame <= written { setMode(s.path, s.mode, newFd: s.fd) }
             scheduled.removeAll { $0.frame <= written }
+            markActive()
             if done == total { break }
             let n = min(total - done, (scheduled.map { $0.frame }.min() ?? Int.max) - written)
             emit(UnsafeBufferPointer(rebasing: pcm[done * 2 ..< (done + n) * 2]))
@@ -183,6 +190,8 @@ func split(_ argv: [String]) {
         for (path, mode, at) in table where at == nil { setMode(path, mode, newFd: -1) }
         // 套用完才回報：寫入端等到這份 ack 才能斷開被移除的輸出（斷開後讀端不再讀，FIFO 會寫滿卡住 split）。atomically 即 tmp＋rename
         try? text.write(toFile: file + ".applied", atomically: true, encoding: .utf8)
+        activeText = text  // 取代還沒生效排程的新檔會蓋掉舊的，舊的就永遠不會有 .active
+        markActive()
     }
 
     _ = fcntl(0, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK)

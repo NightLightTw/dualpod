@@ -51,7 +51,8 @@ for p in fp.values():
     os.mkfifo(p)
 routes = f"{d}/routes"
 def put_routes(text):
-    if os.path.exists(routes + ".applied"): os.remove(routes + ".applied")  # 和 reroute 一樣先清舊 ack，免得上一輪殘留的被當成這次的
+    for ext in (".applied", ".active"):
+        if os.path.exists(routes + ext): os.remove(routes + ext)  # 和 reroute 一樣先清舊 ack，免得上一輪殘留的被當成這次的
     with open(routes + ".tmp", "w") as f: f.write(text)
     os.rename(routes + ".tmp", routes)
 put_routes(f"{fp['a']}:L {fp['b']}:R {fp['m']}:0")
@@ -148,18 +149,21 @@ feed(1.0)
 put_routes(f"{fp['a']}:L@{T + 500} {fp['b3']}:R@{T + 500} {fp['m']}:0")  # frame 22050 早就寫出去了
 feed(0.5)
 assert not os.path.exists(routes + ".applied"), "太晚的排程不能回報已套用"
+assert not os.path.exists(routes + ".active"), "太晚的排程不能回報已執行"
 T2 = T + 2600
 k2 = round((T2 - T) * 44.1)
 t_switch = time.time()
 put_routes(f"{fp['a']}:L@{T2} {fp['b2']}:R@{T2} {fp['m']}:0")
 feed(0.3)
 assert open(routes + ".applied").read() == open(routes).read(), "排定的路由一收下就回報（不等到生效）"
+assert not os.path.exists(routes + ".active"), "排程還沒到 frame k2，不能回報已執行（.active）"
 feed(1.2)
 t_end = time.time()
 time.sleep(0.2)
 for k in names: stop[k] = True
 for t in threads: t.join()
 pr.kill()
+assert open(routes + ".active").read() == open(routes).read(), "frame k2 寫出後 .active 內容要和路由檔一樣"
 fa, fb2, fb3, fm = (frames(k) for k in names)
 assert not fb3, "太晚那份的新輸出不能收到任何資料"
 sw = next(i for i, (l, r) in enumerate(fa) if l == r and l > 0)  # a 第一個「L 複製成雙聲道」的 frame
@@ -174,3 +178,34 @@ after = [t for t, _ in chunks["a"] if t_switch < t < t_end]
 gap = max(y - x for x, y in zip(after, after[1:]))
 assert gap < 0.06, f"a 在加入期間的最大到達間隔 {gap:.3f}s"
 print(f"split join self-test ok (a switches and b2 starts at frame {k2}, a gap {gap*1000:.0f} ms)")
+
+
+# (4) 新的路由檔取代還沒生效的排程：舊的那份永遠不會有 .active，沒有 @ 的新檔一套用就有
+names = ["a", "b2", "m"]
+fp = {k: f"{d}/rp-{k}" for k in names}
+for p in fp.values():
+    if os.path.exists(p): os.remove(p)
+    os.mkfifo(p)
+holders = [os.open(p, os.O_RDWR) for p in fp.values()]
+pr = subprocess.Popen([split, "split", "--routes", routes, "--start-ms", str(T), f"{fp['a']}:LR", f"{fp['m']}:0"],
+                      stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+chunks = {k: [] for k in names}
+stop = {k: False for k in names}
+threads = [threading.Thread(target=rd, args=(k,), daemon=True) for k in names]
+for t in threads: t.start()
+time.sleep(0.2)
+k0 = 0
+feed(0.3)
+first = f"{fp['a']}:L@{T + 5000} {fp['b2']}:R@{T + 5000} {fp['m']}:0"
+put_routes(first)
+feed(0.5)
+assert open(routes + ".applied").read() == first and not os.path.exists(routes + ".active"), "排程中的檔已 applied、還沒 active"
+second = f"{fp['a']}:LR {fp['m']}:0"
+put_routes(second)
+feed(0.5)
+for k in names: stop[k] = True
+for t in threads: t.join()
+pr.kill()
+assert open(routes + ".active").read() == second, "沒有 @ 的新檔套用後 .active 就是它，不是被取代的舊檔"
+assert not frames("b2"), "被取代的排程不能執行"
+print("split replaced-schedule self-test ok")
