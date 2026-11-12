@@ -37,7 +37,9 @@ stop_all() {
   [[ -n ${TEST:-} ]] && return  # 自測時不碰真的 cliairplay
   # 比對任何位置的 run_pair.sh：Documents 裡手動跑的舊 session 結束時會清掉所有 cliairplay，包括新開的。
   # 用行程名稱（-x）或錨定開頭的樣式，不用裸字串 -f：命令列只是「提到」這些字的行程（編輯器、測試腳本）也會被 root 殺掉
-  pkill -TERM -f '^zsh .*/run_pair\.sh' 2>/dev/null; sleep 2
+  # 給 run_pair 最多 2 秒自己收尾（先送 DISCONNECT 給喇叭），收完就不再等；沒有在跑就完全不等
+  pkill -TERM -f '^zsh .*/run_pair\.sh' 2>/dev/null &&
+    for i in {1..20}; do pgrep -f '^zsh .*/run_pair\.sh' >/dev/null || break; sleep 0.1; done
   pkill -9 -f '^zsh .*/run_pair\.sh' 2>/dev/null
   pkill -9 -x cliairplay-macos-arm64 2>/dev/null
   pkill -9 -x audiotee 2>/dev/null
@@ -117,7 +119,7 @@ supervise() {
     child=$!
     reason="" began=$SECONDS
     while ps -p $child >/dev/null 2>&1; do
-      sleep $POLL_S
+      sleep $POLL_S & wait $!  # 前景 sleep 會讓停止的 trap 等到睡完才跑
       reason=$(check $stamp $(( SECONDS - began )))
       [[ -n $reason ]] && break
     done
