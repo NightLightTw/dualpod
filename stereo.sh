@@ -45,6 +45,8 @@ stop_all() {
   pkill -9 -x audiotee 2>/dev/null
   pkill -9 -x localplay 2>/dev/null
   pkill -9 -x stereotool 2>/dev/null
+  # 送出 SIGKILL 不代表已退出：新的 run_pair 看到舊 cliairplay 還在就會放棄，319/320 也要等它退出才釋放
+  for i in {1..20}; do pgrep -x cliairplay-macos-arm64 >/dev/null || break; sleep 0.1; done
   true
 }
 
