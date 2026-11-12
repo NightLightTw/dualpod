@@ -8,7 +8,9 @@ export TEST=1 STATE=$S/state LOGDIR=$S/logs
 A=AAAAAAAAAAAA B=BBBBBBBBBBBB
 RD=$STATE/run
 pids=()
-trap 'pkill -P $pids[1] 2>/dev/null; kill $pids 2>/dev/null' EXIT  # sleep 是 zsh 的子行程，要一起收
+# sleep 是 zsh 的子行程，要一起收；join 還留著的話收掉它（假 client 的父行程，先確認那個 pid 真的是假 client）
+trap 'pkill -P $pids[1] 2>/dev/null; kill $pids 2>/dev/null
+  fp=$(cat $S/fake.pid 2>/dev/null); [[ -n $fp && "$(ps -o command= -p $fp)" == *$S/fakeclient* ]] && kill $(ps -o ppid= -p $fp)' EXIT
 fail() { print -u2 "FAIL: $*"; exit 1 }
 eq() { [[ $1 == $2 ]] || fail "$3：要 [$2]，實際 [$1]" }
 rr() { zsh $HERE/../stereo.sh reroute "$@" }
@@ -54,7 +56,86 @@ grep -q "reroute: $A $B -> $A" $LOGDIR/stereo.log || fail "沒有 log 一行"
 rr $A Mac || fail "剩一台再開 Mac"
 eq "$(snap)" "$A Mac | $RD/pcm-$A:LR $RD/pcm-$B:X $RD/pcm-Mac:LR" "移除 B 後再開 Mac，B:X 仍在（表完整）"
 sleep 0.3; eq "$(cat $S/got-$B)" "ACTION=DISCONNECT" "B 沒有被重送 DISCONNECT"
-unchanged "加喇叭" $A $B
+unchanged "加沒找過的喇叭" $A $B
+
+# 播放中加入一台：真的跑 run_pair.sh join，cliairplay 換成假的（印 clock_ready、收到 START 就回 started）
+TOOL=$HERE/stereotool
+print -r -- "$A"$'\t'"127.0.0.1"$'\t'"a"$'\n'"$B"$'\t'"127.0.0.1"$'\t'"b" > $STATE/speakers
+print "model=fake" > $STATE/txt-$B
+OFF=$($TOOL offset); nowms() { $TOOL now $OFF }
+print $OFF > $RD/clock_offset; print 200 > $RD/latency; print teststamp > $RD/stamp; print $(( $(nowms) - 5000 )) > $RD/start_ms
+cat > $S/fakeclient <<'FAKE'
+#!/bin/zsh
+while (( $# )); do case $1 in --clock-offset-ns) off=$2 ;; --cmdpipe) cp=$2 ;; esac; shift; done
+cd $FAKE_DIR; print $$ > fake.pid
+print "[STATUS] connected"
+[[ -e noready ]] || print "[STATUS] clock_ready mode=ptp state=ready streak_ms=753 exchanges=6 ready_in_ms=0 ready_at_unix_ms=$(( $($FAKE_TOOL now $off) + $(<readyin) ))"
+while read -r line; do
+  print -r -- $line >> fake.got
+  case $line in
+    START_UNIX_MS=*) t=${line#*=} ;;
+    ACTION=START) print "[STATUS] started requested_unix_ms=$t at_unix_ms=$(( t + $(<skew) ))" ;;
+    ACTION=DISCONNECT) print "[STATUS] stopped"; exit ;;
+  esac
+done < $cp
+FAKE
+chmod +x $S/fakeclient
+export FAKE_BIN=$S/fakeclient FAKE_DIR=$S FAKE_TOOL=$TOOL MY_IP=127.0.0.1
+JLOG=$LOGDIR/pair-teststamp-$B.log
+alive() { kill -0 $(cat $S/fake.pid) 2>/dev/null }
+ready_at() { sed -n 's/.*ready_at_unix_ms=\([0-9]*\).*/\1/p' $JLOG }
+print 0 > $S/ackdelay; print 0 > $S/skew; print 300 > $S/readyin; : > $S/got-$B
+
+setdev "$A"
+t0=$(nowms)
+rr $A $B || fail "加入 B"
+t1=$(nowms)
+T2=$(sed -n 's/.*:L@\([0-9]*\) .*/\1/p' $RD/routes)
+eq "$(snap)" "$A $B | $RD/pcm-$A:L@$T2 $RD/pcm-$B.1:R@$T2 $RD/pcm-$B:X $RD/pcm-Mac:0@$T2" "加入：每個留下的輸出都在 T2 切換，B 用新的一代"
+(( T2 >= t0 + 600 && T2 >= $(ready_at) && T2 <= t1 )) || fail "T2=$T2 要不早於 ready_at、比決定時晚 600 ms，且 reroute 等到 T2 才回來（$t0..$t1）"
+eq "$(cat $S/fake.got)" "START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" "B 收到 START 三行"
+eq "$(cat $RD/cur-$B)" ".1" "記下 B 目前這一代"
+alive || fail "加入成功後 B 的 client 要留著"
+eq "$(cat $S/got-$A)" "" "加入時 A 沒收到任何指令"
+grep -q "reroute: $A -> $A $B" $LOGDIR/stereo.log || fail "沒有 log 加入一行"
+
+rm $S/fake.got
+rr $A || fail "移除加入的 B"
+eq "$(snap)" "$A | $RD/pcm-$A:LR $RD/pcm-$B:X $RD/pcm-$B.1:X $RD/pcm-Mac:0" "移除後 B 的兩代都是 X"
+sleep 1.5
+eq "$(cat $S/fake.got)" "ACTION=DISCONNECT" "DISCONNECT 送到 B 這一代的 cmd"
+eq "$(cat $S/got-$B)" "" "起播那一代的 cmd-B 沒收到"
+alive && fail "B 斷開後 client 要結束"
+[[ ! -e $RD/pcm-$B.1 && ! -e $RD/cmd-$B.1 ]] || fail "B 這一代的 FIFO 要收掉"
+
+# 再加一次：又是新的一代、上一代的 log（有 stopped）移開、左右照 LEFT；ready_at 比 now+600 晚時 T2 就是 ready_at
+rm $S/fake.got; print 2000 > $S/readyin
+LEFT=$B rr $A $B || fail "再加入 B"
+T2=$(ready_at)
+eq "$(snap)" "$A $B | $RD/pcm-$B.2:L@$T2 $RD/pcm-$A:R@$T2 $RD/pcm-$B:X $RD/pcm-Mac:0@$T2" "再加入：新的一代 .2，T2 就是 ready_at"
+grep -q stopped $JLOG && fail "這一代的 log 不能有上一代的 stopped"
+grep -q stopped $JLOG.*(N) || fail "上一代的 log 要留著（移開）"
+
+prep() { rr $A || fail "回到只有 A"; sleep 1.5; rm -f $S/fake.got $S/fake.pid }
+joinfails() {  # 名稱：以非 0 結束、devices 不變、新加的 client 被收掉、A 沒收到指令
+  rr $A $B && fail "$1 應該失敗"
+  eq "$(cat $STATE/devices)" $A "$1：devices 不變"
+  sleep 1.5; alive && fail "$1：新加的 client 要被收掉"
+  [[ -z "$(print -l $RD/*-$B.<->(N))" ]] || fail "$1：新加那一代的 FIFO 要收掉"
+  eq "$(cat $S/got-$A)" "" "$1：A 沒收到任何指令"
+  grep -q "加入 $B 失敗" $LOGDIR/stereo.log || fail "$1：沒有 log 失敗一行"
+}
+prep; print 300 > $S/readyin; print 7 > $S/skew
+joinfails "started 的時刻被修正"
+grep -q "ACTION=START" $S/fake.got || fail "時刻被修正那次有送 START"
+prep; print 0 > $S/skew; touch $S/noack
+joinfails "split 沒有 ack"
+grep -q START $S/fake.got && fail "split 沒 ack 就不能送 START"
+rm $S/noack; prep; touch $S/noready
+before=$(cat $RD/routes)
+joinfails "時鐘一直沒就緒"
+eq "$(cat $RD/routes)" $before "時鐘沒就緒不寫路由"
+rm $S/noready
 unchanged "只有 Mac（空集合）" Mac
 unchanged "沒有裝置" 
 unchanged "不認得的喇叭" CCCCCCCCCCCC

@@ -10,6 +10,7 @@ DIR=${DIR:-${0:A:h}}  # 跟著腳本所在位置走：開發在 Documents，安�
 # 狀態放在腳本旁（安裝後是 root 擁有）。放 /tmp 時一般使用者能換掉 pidfile，讓 root 殺錯行程或寫穿 symlink
 STATE=${STATE:-$DIR/state}
 RUN_PAIR=${RUN_PAIR:-$DIR/run_pair.sh}
+TOOL=$DIR/tools/stereotool
 LOGDIR=${LOGDIR:-$DIR/logs}
 LOG=$LOGDIR/stereo.log
 PIDFILE=$STATE/supervisor.pid
@@ -181,6 +182,9 @@ send_cmd() {
   exec {fd}>&-
 }
 
+# 喇叭目前這一代的管道後綴（用全域 rd）：起播時就在的沒有後綴，播放中加入的是 .<n>，reroute 成功時記在 cur-<ID>
+sfx() { local s=$(head -c 8 $rd/cur-$1 2>/dev/null); [[ $s == .<-> ]] && print -r -- $s; true }
+
 my_ip() { ipconfig getifaddr $(route -n get default 2>/dev/null | awk '/interface:/ {print $2}') 2>/dev/null; }
 
 # 找區網裡的 AirPlay 接收器（不含這台 Mac），寫成 SPEAKERS 與每台的 TXT 紀錄。
@@ -243,27 +247,58 @@ case ${1:-status} in
     elif running; then echo "on $(head -c 64 $DEVFILE 2>/dev/null)"; else echo "off"; fi
     tail -1 $LOG 2>/dev/null || true
     ;;
-  reroute)  # 播放中不重啟就改輸出：只能少喇叭、或只開關 Mac。做不到就以非 0 結束且什麼都不動，serve 會退回關了再開
+  reroute)  # 播放中不重啟就改輸出：少喇叭、開關 Mac、或一台在播時再加一台。做不到就以非 0 結束，serve 會退回關了再開
     shift
     running || exit 1
     rd=$(head -c 256 $RUNDIR_FILE 2>/dev/null)
     [[ $rd == /tmp/cliairplay-pair.* || ( -n ${TEST:-} && $rd == $STATE/* ) ]] || exit 1
     [[ -O $rd && -f $rd/ready && -p $rd/pcm-Mac ]] || exit 1  # pcm-Mac：舊版 run_pair 起的這段沒有 routes 可改
     cur=$(head -c 64 $DEVFILE 2>/dev/null)
-    new=() mac=
+    new=() add=() mac=
     for w in "$@"; do
       if [[ $w == Mac ]]; then mac=1
       elif [[ $w == [0-9A-F](#c12) && " $cur " == *" $w "* ]]; then new+=$w
+      elif known $w; then new+=$w add+=$w
       else exit 1; fi
     done
     (( $#new )) || exit 1
+    gone=(); for d in ${=cur}; do [[ $d != Mac && -z ${new[(r)$d]:-} ]] && gone+=$d; done
+    typeset -A SFX; for d in $new; do SFX[$d]=$(sfx $d); done
+    j= jpid= joined= tag=
+    if (( $#add )); then
+      # 加喇叭：原本那台照常播，新的一台另起 client、等它的時鐘就緒，兩邊在同一個時刻 T2 切換。
+      # 只做「一台在播、再加一台」；同時換掉或移除別台就退回重啟。start_ms 是新版 run_pair 才寫的
+      (( $#add == 1 && $#gone == 0 && $#new == 2 )) && [[ -f $rd/start_ms ]] || exit 1
+      j=$add[1]
+      off=$(head -c 32 $rd/clock_offset 2>/dev/null) stamp=$(head -c 32 $rd/stamp 2>/dev/null)
+      [[ $off == (|-)<-> && -n $stamp ]] || exit 1
+      rm -f $rd/join.out  # 上一次加入留下的 ready 行不能被當成這次的
+      SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE LOGDIR=$LOGDIR DEBUG=3 zsh $RUN_PAIR join $rd $j < /dev/null > $rd/join.out 2>> $LOG &!
+      jpid=$!
+      # 之後任何失敗都只收掉新加的這台（它自己會請喇叭斷開），原本那台留給 serve 的重啟處理
+      trap '[[ -z $joined ]] && { say "reroute: 加入 $j 失敗，退回重啟"; kill -TERM $jpid 2>/dev/null }' EXIT
+      for i in {1..100}; do  # run_pair join 自己最多等 8 秒
+        line=$(head -c 64 $rd/join.out 2>/dev/null)
+        [[ -n $line ]] || ! ps -p $jpid > /dev/null 2>&1 && break
+        sleep 0.1
+      done
+      [[ $line == "ready "<->" ."<-> ]] || exit 1
+      SFX[$j]=${line##* }
+      # T2 比現在晚 600 ms：split 要在 T2 − TARGET（200）就寫到那個 frame，它最多超前 60 ms、每 100 ms 才讀一次路由檔；
+      # 之後 cliairplay 還要求 START 至少早 250 ms 送到。時鐘剛就緒時 ready_at 可能還在未來，取較晚的
+      nowms=$($TOOL now $off)
+      T2=${${line#ready }% *}
+      (( T2 < nowms + 600 )) && T2=$(( nowms + 600 ))
+      (( T2 - nowms <= 3000 )) || exit 1
+      tag=@$T2
+    fi
     l=$new[1] r=${new[2]:-}
     [[ -n $r && ${LEFT:-} == $r ]] && l=$r r=$new[1]
-    (( $#new == 2 )) && routes="$rd/pcm-$l:L $rd/pcm-$r:R" || routes="$rd/pcm-$l:LR"
-    gone=(); for d in ${=cur}; do [[ $d != Mac && -z ${new[(r)$d]:-} ]] && gone+=$d; done
-    # 表要完整、可重複套用：run dir 裡每個不在新組合的喇叭 FIFO 都標 X。split 若漏讀一版，下一版仍叫它丟棄，FIFO 才不會填滿卡住全部輸出
-    for f in $rd/pcm-[0-9A-F](#c12)(Np); do [[ -z ${new[(r)${f:t:s/pcm-//}]:-} ]] && routes+=" $f:X"; done
-    routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)"
+    keep=($rd/pcm-$l$SFX[$l] ${r:+$rd/pcm-$r$SFX[$r]})
+    (( $#new == 2 )) && routes="$keep[1]:L$tag $keep[2]:R$tag" || routes="$keep[1]:LR"
+    # 表要完整、可重複套用：run dir 裡每個不在新組合的喇叭 FIFO（含之前幾代的）都標 X。split 若漏讀一版，下一版仍叫它丟棄，FIFO 才不會填滿卡住全部輸出
+    for f in $rd/pcm-[0-9A-F](#c12)(|.<->)(Np); do [[ -z ${keep[(r)$f]:-} ]] && routes+=" $f:X"; done
+    routes+=" $rd/pcm-Mac:$([[ -n $mac ]] && echo LR || echo 0)$tag"
     rm -f $rd/routes.applied  # 舊的 ack 內容可能和這版一樣，先清掉才不會誤判已套用
     print -r -- $routes > $rd/routes.tmp && mv -f $rd/routes.tmp $rd/routes || exit 1
     # 先等 split 回報已套用（它才會關掉被移除的輸出）再斷開：斷開後讀端不再讀，split 若還在寫那個 FIFO 會寫滿卡死，永遠看不到 X
@@ -273,10 +308,21 @@ case ${1:-status} in
     # watchdog 重啟可能在等 ack 時換了 session：寫 DEVFILE 前後都確認還是同一個，否則不改（或還原）並放棄
     same() { [[ "$(head -c 256 $RUNDIR_FILE 2>/dev/null)" == $rd ]] && running }
     same || exit 1
+    if [[ -n $j ]]; then
+      # 新的一台用同一個 T2 起播。START_JOIN：這是接到已經在走的時間軸上。ack 的時刻和要求的不一樣就是它被往後修正，左右會錯開，當失敗
+      send_cmd $rd/cmd-$j$SFX[$j] "START_UNIX_MS=$T2"$'\n'"START_JOIN=1"$'\n'"ACTION=START" || exit 1
+      ack=
+      for i in {1..150}; do ack=$(grep -m1 'STATUS\] started ' $LOGDIR/pair-$stamp-$j.log 2>/dev/null) && break; sleep 0.02; done
+      [[ $ack == *"requested_unix_ms=$T2 at_unix_ms=$T2"(| *) ]] || { say "reroute: $j 的 started ack 不符（要 $T2）：$ack"; exit 1; }
+      same || exit 1
+      print -r -- $SFX[$j] > $rd/cur-$j.tmp && mv -f $rd/cur-$j.tmp $rd/cur-$j || exit 1
+      joined=1
+      $TOOL sleepuntil $T2 $off  # 排定的切換生效前不能再來一份路由（會取代還沒生效的排程）
+    fi
     now="$new${mac:+ Mac}"
     print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
     same || { print -r -- $cur > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE; exit 1; }
-    for d in $gone; do send_cmd $rd/cmd-$d 'ACTION=DISCONNECT'; done
+    for d in $gone; do send_cmd $rd/cmd-$d$(sfx $d) 'ACTION=DISCONNECT'; done
     say "reroute: $cur -> $now"
     ;;
   supervise) supervise ;;
@@ -320,6 +366,7 @@ case ${1:-status} in
           if ! { [[ -z $cfg_changed ]] && running && LEFT=$left zsh $0 reroute ${=want} }; then
             running && zsh $0 off
             LEFT=$left LOCAL_ADJ_MS=$adj zsh $0 on ${=want}
+          else vdone=""  # 播放中加入的那台也要收到存成 0 的音量
           fi
         fi
       fi
@@ -338,7 +385,8 @@ case ${1:-status} in
       rd=$(head -c 64 $RUNDIR_FILE 2>/dev/null)
       if [[ $rd != $vdone ]] && running && [[ $rd == /tmp/cliairplay-pair.* && -O $rd && -f $rd/ready ]]; then
         for kv in $(<$VOLFILE); do
-          [[ -p $rd/cmd-${kv%%=*} ]] && send_cmd $rd/cmd-${kv%%=*} "VOLUME=${kv#*=}"
+          c=$rd/cmd-${kv%%=*}$(sfx ${kv%%=*})
+          [[ -p $c ]] && send_cmd $c "VOLUME=${kv#*=}"
         done
         vdone=$rd
       fi
