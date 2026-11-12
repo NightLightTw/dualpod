@@ -100,8 +100,9 @@ all_ready || { echo "15 秒內 $HP 沒有都 clock_ready，看 logs/pair-$STAMP-
 touch $RUN/ready  # 背景服務看到這個才送播放中改的音量
 
 EXCL=()
-if [[ -n $WITH_MAC && ${1:-} == live ]]; then
-  # 本機喇叭：localplay 先啟動、拿到 pid（audiotee 要排除它，否則自己的聲音會再被錄進來），之後才定共同的 START
+if [[ ${1:-} == live ]]; then
+  # 本機喇叭：不論有沒有選 Mac 都先啟動（沒選時 split 送靜音），播放中開關 Mac 才不必重啟，audiotee 也一直排除它的 pid。
+  # localplay 先啟動、拿到 pid（audiotee 要排除它，否則自己的聲音會再被錄進來），之後才定共同的 START
   mkfifo $RUN/pcm-Mac
   exec {macfd}<>$RUN/pcm-Mac
   launchctl asuser $(id -u $AS_USER) sudo -u $AS_USER $DIR/tools/localplay $CLOCK_OFFSET ${LOCAL_ADJ_MS:-0} \
@@ -149,12 +150,12 @@ if [[ $MODE == live* ]]; then  # 系統聲音：audiotee（process tap，--mute 
     OUTS=($RUN/pcm-$HP[1]:L $RUN/pcm-$HP[2]:R)
     [[ ${LEFT:-} == $HP[2] ]] && OUTS=($RUN/pcm-$HP[2]:L $RUN/pcm-$HP[1]:R)
   fi
-  (( $#EXCL )) && OUTS+=($RUN/pcm-Mac:LR)
+  (( $#EXCL )) && OUTS+=($RUN/pcm-Mac:$([[ -n $WITH_MAC ]] && echo LR || echo 0))  # 路由表之後由 stereo.sh reroute 寫到 $RUN/routes
   $TOOL sleepuntil $(( T - TARGET_MS )) $CLOCK_OFFSET
   # launchctl asuser：從背景服務啟動時也要進使用者的登入 session，系統錄音權限才找得到
   launchctl asuser $(id -u $AS_USER) sudo -u $AS_USER $DIR/audiotee/.build/release/audiotee --stereo --sample-rate 44100 \
       --chunk-duration 0.02 --mute $EXCL 2> $DIR/logs/pair-$STAMP-tap.log |
-    $TOOL split $OUTS 2> $DIR/logs/pair-$STAMP-split.log &
+    $TOOL split --routes $RUN/routes $OUTS 2> $DIR/logs/pair-$STAMP-split.log &
   PIDS+=($!)
   if [[ $MODE == livemeasure ]]; then  # 用 afplay 播 chirp，量端到端延遲（播放呼叫 → 麥克風）與左右偏差
     REC=$DIR/logs/pair-$STAMP-mic.wav
