@@ -124,3 +124,53 @@ gap = max(y - x for x, y in zip(after, after[1:]))
 assert len(fa) > sw_a + 10000 and len(fm) > sw_m + 10000, "切換後 a、m 持續收到資料"
 assert gap < 0.06, f"a 切換後的最大到達間隔 {gap:.3f}s"
 print(f"split reroute self-test ok (switch at frame {sw_a}, b frames {len(fb)}, a gap {gap*1000:.0f} ms)")
+
+
+# (3) 排定時刻的路由（播放中加入一台）：a:LR、m:0 在播，先給一份太晚的（不能套用也不能回報），
+# 再給 a:L@T2 b2:R@T2：a 正好在 frame k2 從 LR 變 L，b2 的第一個 frame 就是內容的 frame k2
+T = 1_000_000
+names = ["a", "b2", "b3", "m"]
+fp = {k: f"{d}/jn-{k}" for k in names}
+for p in fp.values():
+    if os.path.exists(p): os.remove(p)
+    os.mkfifo(p)
+if os.path.exists(routes): os.remove(routes)
+holders = [os.open(p, os.O_RDWR) for p in fp.values()]
+pr = subprocess.Popen([split, "split", "--routes", routes, "--start-ms", str(T), f"{fp['a']}:LR", f"{fp['m']}:0"],
+                      stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
+chunks = {k: [] for k in names}
+stop = {k: False for k in names}
+threads = [threading.Thread(target=rd, args=(k,), daemon=True) for k in names]  # daemon：中途 assert 失敗時不會卡在讀端
+for t in threads: t.start()
+time.sleep(0.2)
+k0 = 0
+feed(1.0)
+put_routes(f"{fp['a']}:L@{T + 500} {fp['b3']}:R@{T + 500} {fp['m']}:0")  # frame 22050 早就寫出去了
+feed(0.5)
+assert not os.path.exists(routes + ".applied"), "太晚的排程不能回報已套用"
+T2 = T + 2600
+k2 = round((T2 - T) * 44.1)
+t_switch = time.time()
+put_routes(f"{fp['a']}:L@{T2} {fp['b2']}:R@{T2} {fp['m']}:0")
+feed(0.3)
+assert open(routes + ".applied").read() == open(routes).read(), "排定的路由一收下就回報（不等到生效）"
+feed(1.2)
+t_end = time.time()
+time.sleep(0.2)
+for k in names: stop[k] = True
+for t in threads: t.join()
+pr.kill()
+fa, fb2, fb3, fm = (frames(k) for k in names)
+assert not fb3, "太晚那份的新輸出不能收到任何資料"
+sw = next(i for i, (l, r) in enumerate(fa) if l == r and l > 0)  # a 第一個「L 複製成雙聲道」的 frame
+assert sw == k2, f"a 要正好在 frame {k2} 切換，實際 {sw}"
+assert all(r == -l for l, r in fa[:k2]) and all(l == r for l, r in fa[k2:]), "a 切換前是原樣立體聲、之後全是 L"
+assert len(fa) > k2 + 10000 and fb2[:1000] and fb2 == [(-l, -l) for l, _ in fa[k2:k2 + len(fb2)]], "b2 從內容的 frame k2 起收 R，一個 frame 都不差"
+assert abs(len(fb2) - (len(fa) - k2)) < 4410, "b2 和 a 一路寫到同一個位置"
+src_l = [l for l, _ in fa if l != 0]
+assert all((y - x) % W == 1 for x, y in zip(src_l, src_l[1:])), "a 的樣本編號跨過切換仍連續"
+assert all(f == (0, 0) for f in fm) and abs(len(fm) - len(fa)) < 4410, "m 全程靜音、沒有卡住"
+after = [t for t, _ in chunks["a"] if t_switch < t < t_end]
+gap = max(y - x for x, y in zip(after, after[1:]))
+assert gap < 0.06, f"a 在加入期間的最大到達間隔 {gap:.3f}s"
+print(f"split join self-test ok (a switches and b2 starts at frame {k2}, a gap {gap*1000:.0f} ms)")

@@ -4,10 +4,13 @@
 //                                           NTP 調整系統時間時兩台不會一台跳、一台慢慢追
 //   stereotool now <offset>                 依上面的時鐘印出現在的 Unix ms
 //   stereotool sleepuntil <unix_ms> <offset>  睡到那個時刻
-//   stereotool split [--routes <檔>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
+//   stereotool split [--routes <檔>] [--start-ms <T>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
 //                                           0（寫靜音，時間軸照走）、X（關掉 fd，之後不再寫）
 //   --routes 檔內容是空白分隔的「路徑:聲道」，約每 100 ms 看一次有沒有變，變了就套用到已開啟的輸出（不認得的路徑略過）；
 //   整個檔格式不對就整份忽略、stderr 記一次。路由只改下一塊起寫給各 fd 的內容，樣本時間軸不動
+//   「路徑:聲道@<unix_ms>」排定在那個時刻對應的 frame 才生效（--start-ms 是 frame 0 播出的時刻 T，frame k 在 T + k/44100 秒播出）。
+//   沒見過的路徑要帶 @ 才會開啟，它的第一個 frame 就是那個 frame：播放中加入的喇叭把起播時刻設成同一個 unix_ms 就和其他台對齊。
+//   那個 frame 已經寫出去（太晚）就整份不套用、不回報，寫入端逾時後改走重啟
 //
 // split 的輸出鎖在牆鐘的 44.1 kHz：process tap 在系統沒出聲時不送資料，這時補靜音，否則 cliairplay 會判定斷流、
 // 各自平移時間軸，兩台的對齊就散了。輸入比牆鐘超前太多（tap 恢復時一次湧入，或時脈漂移累積）就丟掉最舊的，延遲維持固定。
@@ -16,7 +19,7 @@ import Foundation
 
 func rawNs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) }
 func err(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
-func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | split [--routes <檔>] <路徑:L|R|LR|0|X>…"); exit(2) }
+func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | split [--routes <檔>] [--start-ms <T>] <路徑:L|R|LR|0|X>…"); exit(2) }
 
 let args = CommandLine.arguments
 guard args.count >= 2 else { usage() }
@@ -47,9 +50,10 @@ default:
 func split(_ argv: [String]) {
     var specs = argv
     var routesFile: String?
-    if specs.first == "--routes" {
+    var startMs: Int64?
+    while let opt = specs.first, opt == "--routes" || opt == "--start-ms" {
         guard specs.count >= 2 else { usage() }
-        routesFile = specs[1]
+        if opt == "--routes" { routesFile = specs[1] } else if let t = Int64(specs[1]) { startMs = t } else { usage() }
         specs.removeFirst(2)
     }
     let fs = 44100.0
@@ -66,13 +70,21 @@ func split(_ argv: [String]) {
         default: return nil
         }
     }
-    func parseSpec(_ spec: Substring) -> (path: String, mode: Mode)? {
-        guard let colon = spec.lastIndex(of: ":"), let mode = parseMode(spec[spec.index(after: colon)...]) else { return nil }
-        return (String(spec[..<colon]), mode)
+    // at：排定生效的 frame；沒寫 @ 就是 nil（下一塊起生效）
+    func parseSpec(_ spec: Substring) -> (path: String, mode: Mode, at: Int?)? {
+        guard let colon = spec.lastIndex(of: ":") else { return nil }
+        let parts = spec[spec.index(after: colon)...].split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count <= 2, let mode = parseMode(parts[0]) else { return nil }
+        var at: Int?
+        if parts.count == 2 {
+            guard let t0 = startMs, let ms = Int64(parts[1]) else { return nil }
+            at = Int((Double(ms - t0) * 44.1).rounded())
+        }
+        return (String(spec[..<colon]), mode, at)
     }
     var outputs: [(path: String, fd: Int32, mode: Mode)] = []
     for spec in specs {
-        guard let (path, mode) = parseSpec(Substring(spec)) else { err("split: 不認得的輸出 \(spec)"); exit(2) }
+        guard let (path, mode, at) = parseSpec(Substring(spec)), at == nil else { err("split: 不認得的輸出 \(spec)"); exit(2) }
         if mode == .closed { outputs.append((path, -1, .closed)); continue }
         let fd = open(path, O_WRONLY)
         guard fd >= 0 else { err("split: 開不了 \(path)"); exit(1) }
@@ -107,6 +119,32 @@ func split(_ argv: [String]) {
         }
     }
 
+    var written = 0                 // 已輸出的 frame 數；基準線＝牆鐘，tap 在系統靜音時（包括剛啟動）完全不送資料，所以一開始就要補
+    var scheduled: [(frame: Int, path: String, mode: Mode, fd: Int32)] = []  // fd：新輸出預先開好的，既有輸出是 -1
+    func setMode(_ path: String, _ mode: Mode, newFd: Int32) {
+        guard let i = outputs.firstIndex(where: { $0.path == path }) else {
+            if newFd >= 0 { outputs.append((path, newFd, mode)) }
+            return
+        }
+        guard outputs[i].mode != .closed else { return }  // X 之後不再打開
+        if mode == .closed { close(outputs[i].fd); outputs[i].fd = -1 }
+        outputs[i].mode = mode
+    }
+    // 從 frame `written` 接著寫；遇到排定的 frame 就在那裡切開，切換正好落在那個 frame
+    func emitAdvancing(_ pcm: UnsafeBufferPointer<Int16>) {
+        var done = 0
+        let total = pcm.count / 2
+        while true {
+            for s in scheduled where s.frame <= written { setMode(s.path, s.mode, newFd: s.fd) }
+            scheduled.removeAll { $0.frame <= written }
+            if done == total { break }
+            let n = min(total - done, (scheduled.map { $0.frame }.min() ?? Int.max) - written)
+            emit(UnsafeBufferPointer(rebasing: pcm[done * 2 ..< (done + n) * 2]))
+            done += n
+            written += n
+        }
+    }
+
     // 路由檔用 mtime（奈秒）加 inode 判斷有沒有換：寫入端是 tmp＋mv，inode 會變
     var routesSig = "", lastPoll: Int64 = 0
     func pollRoutes(_ now: Int64) {
@@ -118,16 +156,29 @@ func split(_ argv: [String]) {
         guard sig != routesSig else { return }
         routesSig = sig
         guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return }
-        var table: [(String, Mode)] = []
+        var table: [(path: String, mode: Mode, at: Int?)] = []
         for tok in text.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" || $0 == "\r" }) {
-            guard let (path, mode) = parseSpec(tok) else { err("split: 路由檔格式不對，整份忽略（\(tok)）"); return }
-            table.append((path, mode))
+            guard let e = parseSpec(tok) else { err("split: 路由檔格式不對，整份忽略（\(tok)）"); return }
+            table.append(e)
         }
-        for (path, mode) in table {
-            guard let i = outputs.firstIndex(where: { $0.path == path }), outputs[i].mode != .closed else { continue }
-            if mode == .closed { close(outputs[i].fd); outputs[i].fd = -1 }
-            outputs[i].mode = mode
+        // 先整份驗過再動：排定的 frame 不能已經寫出去，新輸出要開得起來。有一項不行就整份不套用、不回報
+        var incoming: [(frame: Int, path: String, mode: Mode, fd: Int32)] = []
+        func reject(_ why: String) { err("split: \(why)，整份不套用"); for s in incoming where s.fd >= 0 { close(s.fd) } }
+        for (path, mode, at) in table {
+            guard let at = at else { continue }
+            guard at >= written else { reject("\(path) 排定的 frame \(at) 已經寫出（現在 \(written)）"); return }
+            var fd: Int32 = -1
+            if mode != .closed, !outputs.contains(where: { $0.path == path }) {
+                // 非阻塞開啟：FIFO 沒有讀端時直接失敗而不是卡住全部輸出；開好再改回阻塞寫，和其他輸出一樣
+                fd = open(path, O_WRONLY | O_NONBLOCK)
+                guard fd >= 0 else { reject("開不了 \(path)"); return }
+                _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+            }
+            incoming.append((at, path, mode, fd))
         }
+        for s in scheduled where s.fd >= 0 { close(s.fd) }  // 新的一份取代還沒生效的排程
+        scheduled = incoming
+        for (path, mode, at) in table where at == nil { setMode(path, mode, newFd: -1) }
         // 套用完才回報：寫入端等到這份 ack 才能斷開被移除的輸出（斷開後讀端不再讀，FIFO 會寫滿卡住 split）。atomically 即 tmp＋rename
         try? text.write(toFile: file + ".applied", atomically: true, encoding: .utf8)
     }
@@ -137,7 +188,6 @@ func split(_ argv: [String]) {
     var tv = timespec()
     clock_gettime(CLOCK_REALTIME, &tv)
     err(String(format: "split: t0_unix=%.6f", Double(tv.tv_sec) + Double(tv.tv_nsec) / 1e9))  // 樣本 0 寫出的時間
-    var written = 0                 // 已輸出的 frame 數；基準線＝牆鐘，tap 在系統靜音時（包括剛啟動）完全不送資料，所以一開始就要補
     var pending = [UInt8]()
     var silenceFrames = 0, droppedFrames = 0, lastLog = -1
     var buf = [UInt8](repeating: 0, count: 65536)
@@ -158,16 +208,14 @@ func split(_ argv: [String]) {
             if take > 0 {  // 丟最舊的、留最新的，延遲才不會被拉長
                 pending.withUnsafeBytes { raw in
                     let s = raw.bindMemory(to: Int16.self)
-                    emit(UnsafeBufferPointer(rebasing: s[(frames - take) * 2 ..< frames * 2]))
+                    emitAdvancing(UnsafeBufferPointer(rebasing: s[(frames - take) * 2 ..< frames * 2]))
                 }
-                written += take
             }
             pending.removeFirst(frames * 4)
         } else if written < due - idle {  // 斷流：補靜音到基準線
             let gap = due - written
             let zeros = [Int16](repeating: 0, count: gap * 2)
-            zeros.withUnsafeBufferPointer { emit($0) }
-            written += gap
+            zeros.withUnsafeBufferPointer { emitAdvancing($0) }
             silenceFrames += gap
         }
         let sec = Int(elapsed)
