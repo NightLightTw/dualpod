@@ -32,7 +32,7 @@ DualPod 安裝說明
 
 原始碼與授權
 - GNU GPL 第 3 版（GPLv3），條款見同資料夾的 LICENSE 與 THIRD_PARTY_NOTICES.md。
-- 原始碼：https://github.com/NightLightTw/airplay-stereo（下載的版本對應同名的 Release tag）
+- 原始碼：https://github.com/NightLightTw/dualpod（下載的版本對應同名的 Release tag）
 
 
 DualPod — install guide (English)
@@ -52,4 +52,4 @@ Needs: an Apple silicon Mac on macOS 14.4 or later, speakers on the same Wi‑Fi
 To remove: Settings → General → Background helper → Remove, then move the app to the Trash.
 
 License: GNU GPL version 3, see LICENSE and THIRD_PARTY_NOTICES.md in this folder.
-Source: https://github.com/NightLightTw/airplay-stereo (the release tag matches this download).
+Source: https://github.com/NightLightTw/dualpod (the release tag matches this download).
