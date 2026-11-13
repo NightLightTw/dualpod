@@ -21,6 +21,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>StereoMenu</string>
   <key>CFBundleIdentifier</key><string>local.airplay-stereo.menu</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleName</key><string>DualPod</string>
   <key>CFBundleDisplayName</key><string>DualPod</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -31,6 +32,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
   <key>LSMinimumSystemVersion</key><string>14.4</string>
 </dict></plist>
 EOF
+mkdir -p "$APP/Contents/Resources"; cp AppIcon.icns "$APP/Contents/Resources/"  # 由 ../tools/make-icon.swift 從 icon.svg 產生
 swiftc -O -target $TARGET ../tools/localplay.swift -o ../tools/localplay  # 本機喇叭同步播放器
 swiftc -O -target $TARGET ../tools/stereotool.swift -o ../tools/stereotool  # 時鐘與拆聲道（取代 Python）
 # 背景服務要裝的檔案打包進 App，App 用管理員密碼視窗安裝或更新；VERSION 是這些檔案的雜湊
