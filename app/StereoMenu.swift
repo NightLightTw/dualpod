@@ -307,18 +307,21 @@ final class App: NSObject, NSApplicationDelegate {
                 copyDiagnostics: { [weak self] in self?.copyDiagnostics() },
                 installHelper: { [weak self] in self?.runHelper(remove: false) },
                 uninstallHelper: { [weak self] in self?.uninstallHelper() }))
+            let glow = NSHostingController(rootView: GlowPane(model: settings))
             audio.sizingOptions = .preferredContentSize  // the window takes each pane's own height
+            glow.sizingOptions = .preferredContentSize
             general.sizingOptions = .preferredContentSize
-            let lastPane = UserDefaults.standard.integer(forKey: SettingsTabs.key)  // before adding tabs: the first one selects itself and saves 0
+            let lastPane = SettingsTabs.savedPane()  // before adding tabs: the first one selects itself and saves
             let tabs = SettingsTabs()
             tabs.tabStyle = .toolbar
-            for (vc, symbol) in [(audio, "hifispeaker.2"), (general, "gearshape")] as [(NSViewController, String)] {
+            for (id, vc, symbol) in [("audio", audio, "hifispeaker.2"), ("glow", glow, "light.max"), ("general", general, "gearshape")] as [(String, NSViewController, String)] {
                 let tab = NSTabViewItem(viewController: vc)
+                tab.identifier = id
                 tab.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 tabs.addTabViewItem(tab)
             }
             tabs.label()
-            tabs.selectedTabViewItemIndex = min(max(lastPane, 0), tabs.tabViewItems.count - 1)
+            tabs.selectedTabViewItemIndex = tabs.tabViewItems.firstIndex { $0.identifier as? String == lastPane } ?? 0
             let w = NSWindow(contentViewController: tabs)
             w.styleMask = [.titled, .closable]
             w.toolbarStyle = .preference
@@ -609,11 +612,17 @@ enum Entry {
     }
 }
 
-/// Settings with Audio and General panes in the toolbar. The window title follows the pane and the last pane reopens.
+/// Settings with Audio, Glow and General panes in the toolbar. The window title follows the pane and the last pane reopens.
 final class SettingsTabs: NSTabViewController {
-    static let key = "settingsPane"
+    static let key = "settingsPaneID"
+    /// 舊版存的是索引（0 音訊、1 一般），加了光暈頁後索引會對不上，所以改存名字並一次性轉換
+    static func savedPane() -> String {
+        let d = UserDefaults.standard
+        if let id = d.string(forKey: key) { return id }
+        return d.integer(forKey: "settingsPane") == 1 ? "general" : "audio"
+    }
     func label() {
-        for (tab, name) in zip(tabViewItems, [t("Audio", "音訊"), t("General", "一般")]) {
+        for (tab, name) in zip(tabViewItems, [t("Audio", "音訊"), t("Glow", "光暈"), t("General", "一般")]) {
             tab.label = name
             tab.viewController?.title = name
         }
@@ -621,6 +630,6 @@ final class SettingsTabs: NSTabViewController {
     }
     override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
         super.tabView(tabView, didSelect: item)
-        UserDefaults.standard.set(selectedTabViewItemIndex, forKey: Self.key)
+        if let id = item?.identifier as? String { UserDefaults.standard.set(id, forKey: Self.key) }
     }
 }
