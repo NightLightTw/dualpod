@@ -248,6 +248,7 @@ typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400" cool "1E40FF 8A2BE2 00B4FF"
 GLOW_DELAY=${GLOW_DELAY:-2}  # SENDMETA 會把顏色重設成白色；是否要隔一段才送封面沒實測過，先等這幾秒
 typeset -A glow_sent  # 每個 cmd 管道收過什麼：「meta@<該送封面的 SECONDS>」或「art:<封面檔名>」；沒有這個鍵就是什麼都沒收過
 glow_rd=""
+glow_open=""  # 已過起播保護的 run dir
 glow_made=""  # glow.jpg 目前是哪組顏色畫的
 # glow 檔（使用者可寫）：off | preset:<名稱> | custom:#RRGGBB[,#RRGGBB[,#RRGGBB]]。印出顏色清單；其他內容一律當關，內容絕不當路徑用
 glow_colors() {
@@ -264,10 +265,14 @@ glow_tick() {
   if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_rd=""; return 0; fi
   [[ $rd != $glow_rd ]] && { glow_sent=(); glow_rd=$rd; }
   # ready 比 START 早建：cliairplay 依序處理 cmd，SENDMETA 是阻塞的網路呼叫，排在 START 前會讓那台的 START 晚到、左右各自重新對時。
-  # 一定要等 start_ms 存在、且過了起播時刻再多 1 秒才碰任何管道（session 時鐘是 CLOCK_UPTIME_RAW 加 offset，和牆上時鐘差一點，1 秒餘裕涵蓋）。
+  # 一定要等 start_ms 存在、且過了起播時刻再多 1 秒才碰任何管道。用這段 session 的時鐘（clock_offset＋stereotool now）比，
+  # 牆上時鐘被調整也不會提早或延後放行；放行過就記住，之後每輪不再叫 stereotool。
   # 播放中加入的喇叭不用另外擋：reroute 在 serve 迴圈裡同步跑到 T2 後才回來，加入那台的管道要等 START 確認後才進 DEVFILE
-  local sm=$(head -c 20 $rd/start_ms 2>/dev/null)
-  [[ $sm == <-> ]] && (( EPOCHREALTIME * 1000 >= sm + 1000 )) || return 0
+  if [[ $glow_open != $rd ]]; then
+    local sm=$(head -c 20 $rd/start_ms 2>/dev/null) off=$(head -c 24 $rd/clock_offset 2>/dev/null)
+    [[ $sm == <-> && $off == (|-)<-> ]] && (( $($TOOL now $off 2>/dev/null || print 0) >= sm + 1000 )) || return 0
+    glow_open=$rd
+  fi
   cols=(${=$(glow_colors)}); (( $#cols )) || return 0
   jpg=$STATE/glow.jpg; key=${(j:-:)cols}  # 只留一張圖，顏色變了才原子換掉；送過什麼以顏色記，不以檔名記
   [[ $key == $glow_made && -f $jpg ]] || { $TOOL glowart $jpg $cols 2>/dev/null || return 0; glow_made=$key; }

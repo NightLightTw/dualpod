@@ -12,7 +12,7 @@ eq() { [[ $1 == $2 ]] || fail "$3：要 [$2]，實際 [$1]" }
 source $HERE/../stereo.sh
 dir=$S/set rd=$STATE/run
 nowms() { print ${$(( EPOCHREALTIME * 1000 ))%.*} }
-mkrun() { mkdir -p $1; touch $1/ready; print $(( $(nowms) - 5000 )) > $1/start_ms }  # 起播時刻已過很久
+mkrun() { mkdir -p $1; touch $1/ready; $TOOL offset > $1/clock_offset; print $(( $(nowms) - 5000 )) > $1/start_ms }  # 起播時刻已過很久
 mkrun $rd
 print -r -- "$A $B Mac" > $DEVFILE
 reader() { mkfifo $1; cat <> $1 >> $2 & pids+=($!) }  # 管道 輸出檔
@@ -91,12 +91,17 @@ kill $hold; wait $hold 2>/dev/null
 cat <> $rd3/cmd-$A > $S/drain & pids+=($!); sleep 0.5; glow_tick; sleep 0.25
 grep -q SENDMETA $S/drain || fail "管道收走後沒有補送 SENDMETA"
 # 起播時刻之前不送：有 ready 但沒有 start_ms、start_ms 在未來、剛過但不到 1 秒，都不能碰管道（會排在 START 前面）
-rd4=$STATE/run4; mkdir -p $rd4; touch $rd4/ready; mkfifo $rd4/cmd-$A; rd=$rd4; print "$A Mac" > $DEVFILE; GLOW_DELAY=0
+rd4=$STATE/run4; mkdir -p $rd4; touch $rd4/ready; $TOOL offset > $rd4/clock_offset; mkfifo $rd4/cmd-$A; rd=$rd4; print "$A Mac" > $DEVFILE; GLOW_DELAY=0
 cat <> $rd4/cmd-$A >> $S/gate & pids+=($!); sleep 0.3
 glow_tick; sleep 0.25; eq "$(cat $S/gate)" "" "沒有 start_ms 不送"
 print $(( $(nowms) + 5000 )) > $rd4/start_ms; glow_tick; sleep 0.25; eq "$(cat $S/gate)" "" "start_ms 在未來不送"
 print $(( $(nowms) - 500 )) > $rd4/start_ms; glow_tick; sleep 0.25; eq "$(cat $S/gate)" "" "start_ms 後不到 1 秒不送"
 print $(( $(nowms) - 1100 )) > $rd4/start_ms; glow_tick; sleep 0.25; eq "$(cat $S/gate)" $META "start_ms 後 1 秒才送 SENDMETA"
+# 牆上時鐘和 session 時鐘分開比：session 時鐘落後牆鐘 10 秒時，就算牆鐘已過起播 2 秒也還不能送
+rd5=$STATE/run5; mkdir -p $rd5; touch $rd5/ready; mkfifo $rd5/cmd-$A; rd=$rd5; : > $S/gate5
+print $(( $($TOOL offset) - 10000000000 )) > $rd5/clock_offset; print $(( $(nowms) - 2000 )) > $rd5/start_ms
+cat <> $rd5/cmd-$A >> $S/gate5 & pids+=($!); sleep 0.3
+glow_tick; sleep 0.25; eq "$(cat $S/gate5)" "" "用 session 時鐘判斷起播，不用牆鐘"
 # 舊版每組顏色一個檔：prune_logs 清掉
 touch $STATE/glow-AAAAAA.jpg; prune_logs; [[ -z "$(print -l $STATE/glow-*(N))" ]] || fail "舊的 glow-*.jpg 沒清掉"
 print "glow self-test ok"
