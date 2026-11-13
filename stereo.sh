@@ -238,6 +238,48 @@ discover() {
 # 找過的喇叭 ID 才算數
 known() { [[ $1 == [0-9A-F](#c12) ]] && grep -q "^$1"$'\t' $SPEAKERS 2>/dev/null; }
 
+# Sound Glow（HomePod 27.2 頂端燈光）：燈色取自 Now Playing 封面的主色。實測只傳音訊不會亮；SENDMETA 會亮但是白色，
+# 之後單獨送 ARTWORK= 才會換成那張圖的主色。cliairplay 會忽略和上一張位元組相同的封面，所以封面一律只用 ARTWORK=、不附在 SENDMETA。
+# 顏色名稱表只在這裡（App 的色票另存一份顯示用，名稱要一致）
+typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400" cool "1E40FF 8A2BE2 00B4FF" aurora "00C853 00E5C0 7CFC00" candy "FF4FA3 B14CFF 4CC9FF")
+GLOW_DELAY=${GLOW_DELAY:-2}  # SENDMETA 會把顏色重設成白色；是否要隔一段才送封面沒實測過，先等這幾秒
+typeset -A glow_sent  # 每個 cmd 管道收過什麼：「meta@<該送封面的 SECONDS>」或「art:<封面檔名>」；沒有這個鍵就是什麼都沒收過
+glow_rd=""
+# glow 檔（使用者可寫）：off | preset:<名稱> | custom:#RRGGBB[,#RRGGBB[,#RRGGBB]]。印出顏色清單；其他內容一律當關，內容絕不當路徑用
+glow_colors() {
+  local v=$(read_user $dir/glow | tr -d ' \n')
+  if [[ $v == preset:[a-z]## && -n ${GLOW_PRESETS[${v#preset:}]:-} ]]; then print -r -- $GLOW_PRESETS[${v#preset:}]
+  elif [[ $v == custom:\#[0-9A-Fa-f](#c6)(,\#[0-9A-Fa-f](#c6))(#c0,2) ]]; then v=${(U)v#custom:}; print -r -- ${${(s:,:)v}#\#}
+  fi
+  true
+}
+# 每個 session 的每個管道：沒收過就送 SENDMETA、隔 GLOW_DELAY 秒再送 ARTWORK=；顏色換了只送新的 ARTWORK=。
+# 播放中改成 off 什麼都不送，下次起播才生效（已經亮著的燈沒有關掉的指令）
+glow_tick() {
+  local -a cols ids; local id p s jpg
+  if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_rd=""; return 0; fi
+  [[ $rd != $glow_rd ]] && { glow_sent=(); glow_rd=$rd; }
+  cols=(${=$(glow_colors)}); (( $#cols )) || return 0
+  jpg=$STATE/glow-${(j:-:)cols}.jpg
+  [[ -f $jpg ]] || $TOOL glowart $jpg $cols 2>/dev/null || return 0
+  ids=(${=$(head -c 64 $DEVFILE 2>/dev/null)})
+  for id in $ids; do
+    [[ $id == [0-9A-F](#c12) ]] || continue
+    p=$rd/cmd-$id$(sfx $id); [[ -p $p ]] || continue
+    s=${glow_sent[$p]:-}
+    if [[ -z $s ]]; then
+      send_cmd $p "TITLE=AirPlay Stereo"$'\n'"ARTIST=Mac"$'\n'"ITEMID=airplay-stereo"$'\n'"ACTION=SENDMETA" && glow_sent[$p]=meta@$(( SECONDS + GLOW_DELAY ))
+    elif [[ $s == meta@* ]]; then
+      (( SECONDS >= ${s#meta@} )) && send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:${jpg:t}
+    elif [[ $s != art:${jpg:t} ]]; then
+      send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:${jpg:t}
+    fi
+  done
+  true
+}
+
+[[ -n ${GLOW_LIB:-} ]] && return 0  # 自測用：只載入函式
+
 case ${1:-status} in
   on)
     shift; DEVICES=$*
@@ -425,6 +467,7 @@ case ${1:-status} in
         done
         vdone=$rd
       fi
+      glow_tick
       sleep 0.3  # 拉音量滑桿要跟手
     done
     ;;
