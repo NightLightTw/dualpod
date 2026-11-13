@@ -330,6 +330,7 @@ final class App: NSObject, NSApplicationDelegate {
             settingsWindow = w
             w.center()
         }
+        settings.reloadGlow()
         NSApp.activate(ignoringOtherApps: true)  // menu bar apps aren't active, so the window would open behind
         settingsWindow?.makeKeyAndOrderFront(nil)
     }

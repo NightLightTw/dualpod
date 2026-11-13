@@ -26,12 +26,20 @@ func writeSetting(_ url: URL, _ text: String) -> Bool {
 
 /// Sound Glow colors. The names and colors must match GLOW_PRESETS in stereo.sh: the app only writes the name,
 /// the service turns it into the colors, and the swatches here are just for display.
+/// parseGlow below must accept exactly what glow_colors in stereo.sh accepts.
 let glowPresets: [(name: String, en: String, zh: String, hex: [String])] = [
     ("warm", "Warm", "暖色", ["FF2D2D", "FF8C00", "FFD400"]),
     ("cool", "Cool", "冷色", ["1E40FF", "8A2BE2", "00B4FF"]),
     ("aurora", "Aurora", "極光", ["00C853", "00E5C0", "7CFC00"]),
     ("candy", "Candy", "糖果", ["FF4FA3", "B14CFF", "4CC9FF"]),
 ]
+/// 規則同 stereo.sh 的 glow_colors：去掉空白與換行，preset 名稱要在表內，custom 是 1 到 3 個 #RRGGBB；其他一律當 off
+func parseGlow(_ raw: String) -> String {
+    let v = raw.filter { $0 != " " && $0 != "\n" }
+    if v.hasPrefix("preset:"), glowPresets.contains(where: { "preset:" + $0.name == v }) { return v }
+    if v.range(of: "^custom:#[0-9A-Fa-f]{6}(,#[0-9A-Fa-f]{6}){0,2}$", options: .regularExpression) != nil { return v }
+    return "off"
+}
 extension Color {
     init(hex: String) {
         let v = UInt32(hex, radix: 16) ?? 0
@@ -63,16 +71,21 @@ final class SettingsModel: ObservableObject {
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
     /// "off", "preset:<name>" or "custom:#RRGGBB"; the service reads it when playback starts and when it changes
-    @Published private(set) var glow = readSetting(glowFile)
+    @Published private(set) var glow = parseGlow(readSetting(glowFile))
     /// Saves first and updates the UI only if that worked, so a failed write leaves the old state and picking again retries
     func setGlow(_ v: String) {
         if writeSetting(glowFile, v) { glow = v; if v.hasPrefix("custom:#") { lastCustom = v } }
     }
     /// 切去預設色再切回來時，自訂色要還在
     private(set) var lastCustom: String?
+    /// 設定視窗每次出現都重讀，外部改了檔（例如手動編輯）才會反映出來
+    func reloadGlow() {
+        glow = parseGlow(readSetting(glowFile))
+        if glow.hasPrefix("custom:#") { lastCustom = glow }
+    }
     init() { if glow.hasPrefix("custom:#") { lastCustom = glow } }
     private var glowBeforeOff = "preset:warm"
-    var glowOn: Bool { glow.hasPrefix("preset:") || glow.hasPrefix("custom:#") }
+    var glowOn: Bool { glow != "off" }
     func setGlowOn(_ on: Bool) {
         if on { setGlow(glowBeforeOff) } else if glowOn { glowBeforeOff = glow; setGlow("off") }
     }
@@ -290,7 +303,7 @@ struct GlowPane: View {
         let _ = model.lang
         Form {
             Section {
-                Toggle(isOn: Binding(get: { model.glowOn }, set: model.setGlowOn)) {
+                Toggle(isOn: Binding(get: { model.glowOn }, set: { if !$0 { closeColorPanel() }; model.setGlowOn($0) })) {
                     Text(t("Light up the HomePods", "讓 HomePod 亮光暈"))
                     Text(t("Colors the light on top while streaming.", "串流時讓頂端的燈亮出顏色。"))
                 }
@@ -308,6 +321,7 @@ struct GlowPane: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+        .onAppear { model.reloadGlow() }
     }
 
     private var glowChoices: some View {
@@ -315,7 +329,7 @@ struct GlowPane: View {
             ForEach(glowPresets, id: \.name) { p in
                 glowItem(label: t(p.en, p.zh), selected: model.glow == "preset:" + p.name) {
                     HStack(spacing: 0) { ForEach(p.hex, id: \.self) { Color(hex: $0) } }
-                } action: { model.setGlow("preset:" + p.name) }
+                } action: { closeColorPanel(); model.setGlow("preset:" + p.name) }
             }
             customItem
         }
@@ -340,11 +354,23 @@ struct GlowPane: View {
         .help(selected ? t("Click to change the color", "點一下改顏色") : t("Pick your own color", "自己選顏色"))
     }
 
+    private func closeColorPanel() {
+        let panel = NSColorPanel.shared
+        panel.setTarget(nil)
+        panel.setAction(nil)
+        panel.orderOut(nil)
+    }
+
     private func openColorPanel() {
+        // 面板的回呼只在選了自訂時才寫檔，所以先選起來；寫入失敗就不開
+        if !model.glow.hasPrefix("custom:#") {
+            model.setGlow("custom:#" + model.customGlow.hexString)
+            guard model.glow.hasPrefix("custom:#") else { return }
+        }
         let panel = NSColorPanel.shared
         panel.showsAlpha = false
         panel.color = NSColor(model.customGlow)
-        colorBridge.onChange = { model.customGlow = Color(nsColor: $0) }
+        colorBridge.onChange = { if model.glow.hasPrefix("custom:#") { model.customGlow = Color(nsColor: $0) } }
         panel.setTarget(colorBridge)
         panel.setAction(#selector(ColorPanelBridge.changed(_:)))
         panel.orderFront(nil)
