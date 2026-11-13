@@ -46,7 +46,7 @@ let glowPresets: [(name: String, en: String, zh: String, hex: [String])] = [
 func parseGlow(_ raw: String) -> String {
     let v = raw.filter { $0 != " " && $0 != "\n" }
     if v.hasPrefix("preset:"), glowPresets.contains(where: { "preset:" + $0.name == v }) { return v }
-    if v.range(of: "^custom:#[0-9A-Fa-f]{6}(,#[0-9A-Fa-f]{6}){0,2}$", options: .regularExpression) != nil { return v }
+    if v.range(of: "^custom:#[0-9A-Fa-f]{6}(,#[0-9A-Fa-f]{6}){0,2}\\z", options: .regularExpression) != nil { return v }
     return "off"
 }
 extension Color {
