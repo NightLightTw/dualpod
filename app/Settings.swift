@@ -6,6 +6,7 @@ import SwiftUI
 
 let leftFile = wantFile.deletingLastPathComponent().appendingPathComponent("left")
 let syncFile = wantFile.deletingLastPathComponent().appendingPathComponent("mac-sync-ms")
+let glowFile = wantFile.deletingLastPathComponent().appendingPathComponent("glow")
 let alignRestoreFile = wantFile.deletingLastPathComponent().appendingPathComponent("align-restore")
 
 func readSetting(_ url: URL) -> String {
@@ -20,6 +21,25 @@ func writeSetting(_ url: URL, _ text: String) -> Bool {
     } catch {
         NSSound.beep()  // nothing changed on screen either, so the user can just try again
         return false
+    }
+}
+
+/// Sound Glow colors. The names and colors must match GLOW_PRESETS in stereo.sh: the app only writes the name,
+/// the service turns it into the colors, and the swatches here are just for display.
+let glowPresets: [(name: String, en: String, zh: String, hex: [String])] = [
+    ("warm", "Warm", "暖色", ["FF2D2D", "FF8C00", "FFD400"]),
+    ("cool", "Cool", "冷色", ["1E40FF", "8A2BE2", "00B4FF"]),
+    ("aurora", "Aurora", "極光", ["00C853", "00E5C0", "7CFC00"]),
+    ("candy", "Candy", "糖果", ["FF4FA3", "B14CFF", "4CC9FF"]),
+]
+extension Color {
+    init(hex: String) {
+        let v = UInt32(hex, radix: 16) ?? 0
+        self.init(.sRGB, red: Double(v >> 16 & 255) / 255, green: Double(v >> 8 & 255) / 255, blue: Double(v & 255) / 255)
+    }
+    var hexString: String {
+        let c = NSColor(self).usingColorSpace(.sRGB) ?? .white
+        return String(format: "%02X%02X%02X", Int((c.redComponent * 255).rounded()), Int((c.greenComponent * 255).rounded()), Int((c.blueComponent * 255).rounded()))
     }
 }
 
@@ -42,6 +62,19 @@ final class SettingsModel: ObservableObject {
     @Published var helper = "ok"  // "missing", "outdated", "stopped", "ok"
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
+    /// "off", "preset:<name>" or "custom:#RRGGBB"; the service reads it when playback starts and when it changes
+    @Published var glow = readSetting(glowFile) {
+        didSet { if glow != oldValue { writeSetting(glowFile, glow) } }
+    }
+    private var glowBeforeOff = "preset:warm"
+    var glowOn: Bool { glow.hasPrefix("preset:") || glow.hasPrefix("custom:#") }
+    func setGlowOn(_ on: Bool) {
+        if on { glow = glowBeforeOff } else if glowOn { glowBeforeOff = glow; glow = "off" }
+    }
+    var customGlow: Color {
+        get { glow.hasPrefix("custom:#") ? Color(hex: String(glow.dropFirst(8).prefix(6))) : .white }
+        set { glow = "custom:#" + newValue.hexString }
+    }
     var onLangChange: () -> Void = {}
     var pair: [String] { playing.count == 2 ? playing : [] }
     var pairReady: Bool { pair.count == 2 && !switching }
@@ -198,10 +231,55 @@ struct AudioPane: View {
                      : t("The Mac plays \(model.sync) ms later than the HomePods.", "Mac 比 HomePod 晚 \(model.sync) ms 播。"))
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle(isOn: Binding(get: { model.glowOn }, set: model.setGlowOn)) {
+                    Text(t("Light up the HomePods", "讓 HomePod 亮光暈"))
+                    Text(t("Colors the light on top while streaming.", "串流時讓頂端的燈亮出顏色。"))
+                }
+                if model.glowOn {
+                    glowChoices
+                    LabeledContent(t("Custom color", "自訂顏色")) {
+                        ColorPicker(t("Custom color", "自訂顏色"), selection: Binding(get: { model.customGlow }, set: { model.customGlow = $0 }), supportsOpacity: false)
+                            .labelsHidden()
+                    }
+                }
+            } header: {
+                Text(t("Sound Glow", "聲波光暈"))
+            } footer: {
+                Text(t("Needs HomePod software 27.2 and Sound Glow turned on in the Home app. Turning it off takes effect the next time playback starts.",
+                       "需要 HomePod 軟體 27.2，並在「家庭」App 開啟聲波光暈。關閉要等下次開始播放才生效。"))
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var glowChoices: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ForEach(glowPresets, id: \.name) { p in
+                glowItem(label: t(p.en, p.zh), selected: model.glow == "preset:" + p.name) {
+                    HStack(spacing: 0) { ForEach(p.hex, id: \.self) { Color(hex: $0) } }
+                } action: { model.glow = "preset:" + p.name }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    private func glowItem<Swatch: View>(label: String, selected: Bool, @ViewBuilder swatch: () -> Swatch, action: @escaping () -> Void) -> some View {
+        VStack(spacing: 6) {
+            swatch().frame(width: 44, height: 44).clipShape(Circle())
+                .overlay(Circle().strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: selected ? 3 : 1))
+                .contentShape(Circle())
+                .onTapGesture(perform: action)
+            Text(label).font(.caption).foregroundStyle(selected ? .primary : .secondary)
+        }
+        .frame(width: 70)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// Like the Home app's stereo pair screen: the left speaker on the left, the right one on the right.
