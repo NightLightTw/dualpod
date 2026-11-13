@@ -6,6 +6,8 @@
 //   stereotool sleepuntil <unix_ms> <offset>  睡到那個時刻
 //   stereotool split [--routes <檔>] [--start-ms <T>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
 //                                           0（寫靜音，時間軸照走）、X（關掉 fd，之後不再寫）
+//   stereotool glowart <out.jpg> <RRGGBB>…   寫 512x512 sRGB JPEG，1 到 3 個顏色等寬直條。HomePod 的 Sound Glow 從 Now Playing 封面取主色，
+//                                           這張圖就是拿來指定光暈顏色的
 //   --routes 檔內容是空白分隔的「路徑:聲道」，約每 100 ms 看一次有沒有變，變了就套用到已開啟的輸出（不認得的路徑略過）；
 //   整個檔格式不對就整份忽略、stderr 記一次。路由只改下一塊起寫給各 fd 的內容，樣本時間軸不動
 //   「路徑:聲道@<unix_ms>」排定在那個時刻對應的 frame 才生效（--start-ms 是 frame 0 播出的時刻 T，frame k 在 T + k/44100 秒播出）。
@@ -16,10 +18,13 @@
 // 各自平移時間軸，兩台的對齊就散了。輸入比牆鐘超前太多（tap 恢復時一次湧入，或時脈漂移累積）就丟掉最舊的，延遲維持固定。
 // shortcut: 丟樣本／補靜音是整段硬切，漂移累積到門檻時會有一次小爆音；要更乾淨再改成重取樣
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
 
 func rawNs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) }
 func err(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
-func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | split [--routes <檔>] [--start-ms <T>] <路徑:L|R|LR|0|X>…"); exit(2) }
+func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | glowart <out.jpg> <RRGGBB>… | split [--routes <檔>] [--start-ms <T>] <路徑:L|R|LR|0|X>…"); exit(2) }
 
 let args = CommandLine.arguments
 guard args.count >= 2 else { usage() }
@@ -40,11 +45,32 @@ case "sleepuntil":
     let wait = ms * 1_000_000 - off - rawNs()
     if wait > 0 { Thread.sleep(forTimeInterval: Double(wait) / 1e9) }
 
+case "glowart":
+    glowart(out: args.count >= 4 ? args[2] : "", hex: Array(args.dropFirst(3)))
+
 case "split":
     split(Array(args.dropFirst(2)))
 
 default:
     usage()
+}
+
+func glowart(out: String, hex: [String]) {
+    guard !out.isEmpty, (1...3).contains(hex.count),
+          hex.allSatisfy({ $0.count == 6 && $0.allSatisfy(\.isHexDigit) && $0.allSatisfy(\.isASCII) }) else { usage() }
+    let n = 512
+    let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+    guard let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: 0, space: cs,
+                              bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { err("glowart: 建不了畫布"); exit(1) }
+    for (i, h) in hex.enumerated() {
+        let v = UInt32(h, radix: 16)!
+        ctx.setFillColor(CGColor(colorSpace: cs, components: [CGFloat(v >> 16 & 255) / 255, CGFloat(v >> 8 & 255) / 255, CGFloat(v & 255) / 255, 1])!)
+        ctx.fill(CGRect(x: i * n / hex.count, y: 0, width: (i + 1) * n / hex.count - i * n / hex.count, height: n))
+    }
+    let tmp = out + ".tmp.\(getpid())"  // 沒有 .jpg 結尾也沒關係，destination 指定了型別
+    guard let img = ctx.makeImage(), let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: tmp) as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { err("glowart: 寫不出 \(out)"); exit(1) }
+    CGImageDestinationAddImage(dest, img, [kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+    guard CGImageDestinationFinalize(dest), rename(tmp, out) == 0 else { unlink(tmp); err("glowart: 寫不出 \(out)"); exit(1) }
 }
 
 func split(_ argv: [String]) {
