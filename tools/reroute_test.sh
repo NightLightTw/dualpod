@@ -168,6 +168,24 @@ wait $swp; sleep 0.3
 eq "$(cat $STATE/devices)" "$A $B" "session 被換掉，devices 維持原樣"
 eq "$(cat $S/got-$A)" "" "session 被換掉不送 DISCONNECT"
 print -r -- $RD > $STATE/rundir
+# 鎖：被占住就立刻以非 0 結束、什麼都不動、不能把別人的鎖拆掉
+setdev "$A $B"; rm -f $RD/routes.applied; print 0 > $S/ackdelay
+mkdir $STATE/reroute.lock
+unchanged "reroute 鎖被占住" $B
+[[ -d $STATE/reroute.lock ]] || fail "拿不到鎖時不能拆掉別人的鎖"
+# 過期的鎖會被清掉；同一次移除 A（起播那一代），順便驗 DISCONNECT 後沒結束的 client 被 SIGKILL，且只殺 cmdpipe 路徑完全相符的 cliairplay
+touch -t 202001010000 $STATE/reroute.lock
+mkdir $S/fk; cp /bin/zsh $S/fk/cliairplay-macos-arm64; codesign -s - -f $S/fk/cliairplay-macos-arm64 2> /dev/null
+$S/fk/cliairplay-macos-arm64 -c 'sleep 30; :' x --cmdpipe $RD/cmd-$A & kpid=$!; pids+=($kpid)
+$S/fk/cliairplay-macos-arm64 -c 'sleep 30; :' x --cmdpipe $RD/cmd-${A}x & dpid=$!; pids+=($dpid)
+sleep 0.5; kill -0 $kpid $dpid || fail "假 client 沒起來"
+rr $B || fail "過期的鎖應被清掉"
+[[ ! -d $STATE/reroute.lock ]] || fail "reroute 結束要放掉鎖"
+eq "$(cat $STATE/devices)" "$B" "過期鎖清掉後照常 reroute"
+sleep 1.6
+kill -0 $kpid 2>/dev/null && fail "被移除的 client 沒被 SIGKILL"
+kill -0 $dpid 2>/dev/null || fail "路徑不同的 client 不能被殺"
+[[ -d $STATE/reroute.lock ]] && fail "背景收尾不能留鎖"
 rm -f $STATE/supervisor.pid
 unchanged "沒在播" $A
 print $pids[1] > $STATE/supervisor.pid; rm $RD/ready

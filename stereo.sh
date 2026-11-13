@@ -144,7 +144,9 @@ supervise() {
     done
     [[ -z $reason ]] && reason="run_pair_exited: run_pair exited"
     say "restart: $reason"
-    kill -TERM $child 2>/dev/null; wait $child 2>/dev/null; stop_all
+    kill -TERM $child 2>/dev/null
+    for t in {1..30}; do kill -0 $child 2>/dev/null || break; sleep 0.1; done  # run_pair 卡住不收尾時不能永遠等
+    kill -9 $child 2>/dev/null; wait $child 2>/dev/null; stop_all
     summarize $stamp ${reason%%:*} $began_at
     summarized=$stamp
     now=$(date +%s); restarts+=($now); recent=0
@@ -184,6 +186,17 @@ send_cmd() {
 
 # 喇叭目前這一代的管道後綴（用全域 rd）：起播時就在的沒有後綴，播放中加入的是 .<n>，reroute 成功時記在 cur-<ID>
 sfx() { local s=$(head -c 8 $rd/cur-$1 2>/dev/null); [[ $s == .<-> ]] && print -r -- $s; true }
+
+# 被移除、屬於起播那一代的 client：DISCONNECT 後最多等 1 秒，還在就只 SIGKILL 它。
+# 用完整 cmdpipe 路徑（run dir 內、每個 session 唯一）當固定字串比對，不用 regex
+reap_client() {
+  local p i; local -a pids
+  pids=(${(f)"$(pgrep -x cliairplay-macos-arm64 2>/dev/null)"})
+  for p in $pids; do [[ "$(ps -o args= -p $p 2>/dev/null) " == *" --cmdpipe $1 "* ]] || pids=(${pids:#$p}); done
+  (( $#pids )) || return 0
+  for i in {1..10}; do kill -0 $pids 2>/dev/null || return 0; sleep 0.1; done
+  kill -9 $pids 2>/dev/null; true
+}
 
 my_ip() { ipconfig getifaddr $(route -n get default 2>/dev/null | awk '/interface:/ {print $2}') 2>/dev/null; }
 
@@ -249,6 +262,10 @@ case ${1:-status} in
     ;;
   reroute)  # 播放中不重啟就改輸出：少喇叭、開關 Mac、或一台在播時再加一台。做不到就以非 0 結束，serve 會退回關了再開
     shift
+    # 不能兩個 reroute 同時改路由與 DEVFILE：拿不到鎖就以非 0 結束，serve 退回重啟（鎖的寫法同 discover）
+    [[ -n $(find $STATE/reroute.lock -maxdepth 0 -mmin +5 2>/dev/null) ]] && rmdir $STATE/reroute.lock
+    mkdir $STATE/reroute.lock 2>/dev/null || exit 1
+    trap 'rmdir $STATE/reroute.lock 2>/dev/null' EXIT
     running || exit 1
     rd=$(head -c 256 $RUNDIR_FILE 2>/dev/null)
     [[ $rd == /tmp/cliairplay-pair.* || ( -n ${TEST:-} && $rd == $STATE/* ) ]] || exit 1
@@ -282,7 +299,7 @@ case ${1:-status} in
       SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE LOGDIR=$LOGDIR DEBUG=3 zsh $RUN_PAIR join $rd $j < /dev/null > $rd/join.out 2>> $LOG &!
       jpid=$!
       # 之後任何失敗都只收掉新加的這台（它自己會請喇叭斷開），原本那台留給 serve 的重啟處理
-      trap '[[ -z $joined ]] && { say "reroute: 加入 $j 失敗，退回重啟"; kill -TERM $jpid 2>/dev/null }' EXIT
+      trap 'rmdir $STATE/reroute.lock 2>/dev/null; [[ -z $joined ]] && { say "reroute: 加入 $j 失敗，退回重啟"; kill -TERM $jpid 2>/dev/null }' EXIT
       for i in {1..100}; do  # run_pair join 自己最多等 8 秒
         line=$(head -c 64 $rd/join.out 2>/dev/null)
         [[ -n $line ]] || ! ps -p $jpid > /dev/null 2>&1 && break
@@ -337,7 +354,10 @@ case ${1:-status} in
     now="$new${mac:+ Mac}"
     print -r -- $now > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE
     same || { print -r -- $cur > $DEVFILE.tmp && mv -f $DEVFILE.tmp $DEVFILE; exit 1; }
-    for d in $gone; do send_cmd $rd/cmd-$d$(sfx $d) 'ACTION=DISCONNECT'; done
+    for d in $gone; do
+      send_cmd $rd/cmd-$d$(sfx $d) 'ACTION=DISCONNECT'
+      [[ -z $(sfx $d) ]] && { reap_client $rd/cmd-$d &! }
+    done
     say "reroute: $cur -> $now"
     ;;
   supervise) supervise ;;
