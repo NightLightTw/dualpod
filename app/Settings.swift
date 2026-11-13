@@ -63,17 +63,17 @@ final class SettingsModel: ObservableObject {
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
     /// "off", "preset:<name>" or "custom:#RRGGBB"; the service reads it when playback starts and when it changes
-    @Published var glow = readSetting(glowFile) {
-        didSet { if glow != oldValue { writeSetting(glowFile, glow) } }
-    }
+    @Published private(set) var glow = readSetting(glowFile)
+    /// Saves first and updates the UI only if that worked, so a failed write leaves the old state and picking again retries
+    func setGlow(_ v: String) { if writeSetting(glowFile, v) { glow = v } }
     private var glowBeforeOff = "preset:warm"
     var glowOn: Bool { glow.hasPrefix("preset:") || glow.hasPrefix("custom:#") }
     func setGlowOn(_ on: Bool) {
-        if on { glow = glowBeforeOff } else if glowOn { glowBeforeOff = glow; glow = "off" }
+        if on { setGlow(glowBeforeOff) } else if glowOn { glowBeforeOff = glow; setGlow("off") }
     }
     var customGlow: Color {
         get { glow.hasPrefix("custom:#") ? Color(hex: String(glow.dropFirst(8).prefix(6))) : .white }
-        set { glow = "custom:#" + newValue.hexString }
+        set { setGlow("custom:#" + newValue.hexString) }
     }
     var onLangChange: () -> Void = {}
     var pair: [String] { playing.count == 2 ? playing : [] }
@@ -261,7 +261,7 @@ struct AudioPane: View {
             ForEach(glowPresets, id: \.name) { p in
                 glowItem(label: t(p.en, p.zh), selected: model.glow == "preset:" + p.name) {
                     HStack(spacing: 0) { ForEach(p.hex, id: \.self) { Color(hex: $0) } }
-                } action: { model.glow = "preset:" + p.name }
+                } action: { model.setGlow("preset:" + p.name) }
             }
         }
         .frame(maxWidth: .infinity)
