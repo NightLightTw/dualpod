@@ -1,6 +1,6 @@
 #!/bin/zsh
-# 編出選單列 app：zsh app/build.sh → app/AirPlay Stereo.app（自己用）
-# 給別人：zsh app/build.sh dist → dist/AirPlay-Stereo.zip（在 iCloud 外建置、整包簽名、附安裝說明）
+# 編出選單列 app：zsh app/build.sh → app/DualPod.app（自己用）
+# 給別人：zsh app/build.sh dist → dist/DualPod.zip（在 iCloud 外建置、整包簽名、附安裝說明）
 set -eu
 cd ${0:A:h}
 TARGET=arm64-apple-macos14.4  # 系統錄音（process tap）從 14.4 才有；不指定會變成只能在編譯這台的版本上跑
@@ -8,9 +8,9 @@ if [[ ${1:-} == dist ]]; then
   # iCloud 同步的資料夾會一直加回 FinderInfo，整包簽不了，所以到快取資料夾建置
   OUT="$HOME/Library/Caches/airplay-stereo-dist"
   rm -rf "$OUT"; mkdir -p "$OUT"
-  APP="$OUT/AirPlay Stereo.app"
+  APP="$OUT/DualPod.app"
 else
-  APP="AirPlay Stereo.app"
+  APP="DualPod.app"
 fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
@@ -21,11 +21,12 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <plist version="1.0"><dict>
   <key>CFBundleExecutable</key><string>StereoMenu</string>
   <key>CFBundleIdentifier</key><string>local.airplay-stereo.menu</string>
-  <key>CFBundleName</key><string>AirPlay Stereo</string>
+  <key>CFBundleName</key><string>DualPod</string>
+  <key>CFBundleDisplayName</key><string>DualPod</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSUIElement</key><true/>
-  <key>NSAudioCaptureUsageDescription</key><string>AirPlay Stereo records the Mac's sound to send it to your speakers. AirPlay Stereo 會錄下 Mac 的聲音，送到喇叭。</string>
+  <key>NSAudioCaptureUsageDescription</key><string>DualPod records the Mac's sound to send it to your speakers. DualPod 會錄下 Mac 的聲音，送到喇叭。</string>
   <key>NSMicrophoneUsageDescription</key><string>Auto-align listens to the speakers to line the Mac up with the HomePods. 自動對齊會用麥克風聽喇叭，把 Mac 和 HomePod 對齊。</string>
   <key>LSMinimumSystemVersion</key><string>14.4</string>
 </dict></plist>
@@ -53,13 +54,13 @@ if [[ ${1:-} == dist ]]; then
   codesign --verify --strict --deep --verbose=1 "$APP"
   for f in $HELPERS; do codesign --verify --strict "$f"; done  # 放在 Resources 裡的不算 App 的巢狀程式碼，要各自驗
   # 一個資料夾裝 App 和說明，用 ditto 壓（中文檔名用 UTF-8，zip 指令會變亂碼）
-  PKG="$OUT/AirPlay Stereo"
+  PKG="$OUT/DualPod"
   mkdir -p "$PKG"; mv "$APP" "$PKG/"; cp ../dist-README.txt "$PKG/安裝說明.txt"
   # GPLv3 與上游授權條款要跟著執行檔一起給；原始碼在 GitHub repo
   cp ../LICENSE ../THIRD_PARTY_NOTICES.md "$PKG/"; cp ../third_party/cliairplay-THIRD_PARTY_NOTICES.md "$PKG/"
-  mkdir -p ../dist; rm -f ../dist/AirPlay-Stereo.zip
-  ditto -c -k --norsrc --keepParent "$PKG" ../dist/AirPlay-Stereo.zip
-  echo "dist: $(cd ..; pwd)/dist/AirPlay-Stereo.zip"
+  mkdir -p ../dist; rm -f ../dist/DualPod.zip
+  ditto -c -k --norsrc --keepParent "$PKG" ../dist/DualPod.zip
+  echo "dist: $(cd ..; pwd)/dist/DualPod.zip"
 else
   # shortcut: 專案在 iCloud 同步的 Documents，FinderInfo 會被加回、整包簽不了；執行檔已由 linker 簽好，本機可用
   codesign -s - --force "$APP" 2>/dev/null || echo "(bundle signing skipped: iCloud-synced folder; executable is linker-signed)"

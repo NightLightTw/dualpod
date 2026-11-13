@@ -3,6 +3,7 @@
 /audiotee/
 
 # 建置產物
+/app/DualPod.app/
 /app/AirPlay Stereo.app/
 /dist/
 /tools/localplay

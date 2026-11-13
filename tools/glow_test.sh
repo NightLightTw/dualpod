@@ -18,7 +18,7 @@ for d in $A $B; do reader $rd/cmd-$d $S/got-$d; done
 sleep 0.3
 got() { sleep 0.25; cat $S/got-$1 2>/dev/null }
 clear() { : > $S/got-$A; : > $S/got-$B }
-META=$'TITLE=AirPlay Stereo\nARTIST=Mac\nITEMID=airplay-stereo\nACTION=SENDMETA'
+META=$'TITLE=DualPod\nARTIST=Mac\nITEMID=airplay-stereo\nACTION=SENDMETA'
 WARM=$STATE/glow.jpg
 
 # 沒有 glow 檔、關、亂寫的內容：什麼都不送、也不產圖

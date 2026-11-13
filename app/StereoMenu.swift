@@ -258,7 +258,7 @@ final class App: NSObject, NSApplicationDelegate {
         let shown = pending?.want ?? actual
         let streaming = shown.contains { $0 != "Mac" }
         item.button?.image = NSImage(systemSymbolName: streaming ? "hifispeaker.2.fill" : "hifispeaker.2",
-                                     accessibilityDescription: "AirPlay Stereo")
+                                     accessibilityDescription: "DualPod")
         header.title = pending != nil ? t("Output · switching…", "輸出 · 切換中…")
             : streaming ? t("Output · ~0.3 s latency", "輸出 · 延遲約 0.3 秒")
             : speakers.isEmpty ? t("Output · looking for speakers…", "輸出 · 正在尋找喇叭…") : t("Output", "輸出")
@@ -290,7 +290,7 @@ final class App: NSObject, NSApplicationDelegate {
         let canAlign = pending == nil && actual.contains("Mac") && !playing.isEmpty
         if settings.canAlign != canAlign { settings.canAlign = canAlign }
         settingsTabs?.label()
-        quit.title = t("Quit AirPlay Stereo", "結束 AirPlay Stereo")
+        quit.title = t("Quit DualPod", "結束 DualPod")
     }
 
     @objc func openSettings() {
@@ -486,7 +486,7 @@ final class App: NSObject, NSApplicationDelegate {
         }
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         var text = [
-            "AirPlay Stereo \(version)",
+            "DualPod \(version)",
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
             "status: \(lastStatus.first ?? "?")",
             "speakers found: \(speakers.count), mac_sync_ms: \(settings.appliedSync)",
@@ -535,9 +535,9 @@ final class App: NSObject, NSApplicationDelegate {
             return
         }
         let prompt = remove
-            ? t("AirPlay Stereo wants to remove its background helper.", "AirPlay Stereo 要移除背景服務。")
-            : t("AirPlay Stereo needs to install its background helper to send sound to your speakers.",
-                "AirPlay Stereo 要安裝背景服務，才能把聲音送到喇叭。")
+            ? t("DualPod wants to remove its background helper.", "DualPod 要移除背景服務。")
+            : t("DualPod needs to install its background helper to send sound to your speakers.",
+                "DualPod 要安裝背景服務，才能把聲音送到喇叭。")
         settings.helperBusy = true
         render(lastStatus)  // grey out the menu's install item right away
         DispatchQueue.global().async {
@@ -587,8 +587,8 @@ final class App: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = t("Install the background helper?", "要安裝背景服務嗎？")
-        a.informativeText = t("AirPlay Stereo uses a small background helper to stream to your speakers. macOS will ask for your password once.",
-                              "AirPlay Stereo 要用一個背景服務把聲音送到喇叭。macOS 會請你輸入一次密碼。")
+        a.informativeText = t("DualPod uses a small background helper to stream to your speakers. macOS will ask for your password once.",
+                              "DualPod 要用一個背景服務把聲音送到喇叭。macOS 會請你輸入一次密碼。")
         a.addButton(withTitle: t("Install", "安裝"))
         a.addButton(withTitle: t("Later", "稍後"))
         if a.runModal() == .alertFirstButtonReturn { runHelper(remove: false) }

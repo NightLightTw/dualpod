@@ -272,7 +272,7 @@ glow_tick() {
     p=$rd/cmd-$id$(sfx $id); [[ -p $p ]] || continue
     s=${glow_sent[$p]:-}
     if [[ -z $s ]]; then
-      send_cmd $p "TITLE=AirPlay Stereo"$'\n'"ARTIST=Mac"$'\n'"ITEMID=airplay-stereo"$'\n'"ACTION=SENDMETA" && glow_sent[$p]=meta@$(( SECONDS + GLOW_DELAY ))
+      send_cmd $p "TITLE=DualPod"$'\n'"ARTIST=Mac"$'\n'"ITEMID=airplay-stereo"$'\n'"ACTION=SENDMETA" && glow_sent[$p]=meta@$(( SECONDS + GLOW_DELAY ))
     elif [[ $s == meta@* ]]; then
       (( SECONDS >= ${s#meta@} )) && send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:$key
     elif [[ $s != art:$key ]]; then

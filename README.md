@@ -1,4 +1,6 @@
-# AirPlay Stereo
+# DualPod
+
+Formerly AirPlay Stereo.
 
 A macOS menu bar app that sends all of your Mac's sound over AirPlay 2 to one or two speakers. With two speakers,
 one plays the left channel and the other the right, so two HomePod minis that can't be paired as a stereo pair
@@ -22,7 +24,7 @@ and found out the two can't be set up as a stereo pair. That was annoying enough
 
 ## Install
 
-Download `AirPlay-Stereo.zip` from Releases and follow `安裝說明.txt` inside (Chinese and English).
+Download `DualPod.zip` from Releases and follow `安裝說明.txt` inside (Chinese and English).
 The app is ad-hoc signed and not notarized, so macOS blocks it the first time: open it from
 System Settings → Privacy & Security → Open Anyway.
 
@@ -58,8 +60,8 @@ system audio ──audiotee (Core Audio process tap)──▶ stereotool split �
 
 ```bash
 zsh scripts/fetch-deps.sh      # clone airplay-cli and audiotee, apply patches/, build them
-zsh app/build.sh               # app/AirPlay Stereo.app for yourself
-zsh app/build.sh dist          # dist/AirPlay-Stereo.zip for others (signed, with install notes)
+zsh app/build.sh               # app/DualPod.app for yourself
+zsh app/build.sh dist          # dist/DualPod.zip for others (signed, with install notes)
 ```
 
 Requires Xcode or the Command Line Tools. The measurement tools are for development only: they need Python with
