@@ -12,6 +12,15 @@ let alignRestoreFile = wantFile.deletingLastPathComponent().appendingPathCompone
 func readSetting(_ url: URL) -> String {
     ((try? String(contentsOf: url, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 }
+/// 和 helper 的 read_user 一樣讀 glow 檔：不跟隨 symlink、非阻塞、只讀前 64 bytes；空白與換行由 parseGlow 去掉，其他字元（tab、CR）不去，所以兩邊對同一個檔判斷一致
+func readGlowFile(_ url: URL = glowFile) -> String {
+    let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+    guard fd >= 0 else { return "" }
+    defer { close(fd) }
+    var buf = [UInt8](repeating: 0, count: 64)
+    let n = read(fd, &buf, 64)
+    return n > 0 ? String(decoding: buf[0..<n], as: UTF8.self) : ""
+}
 @discardableResult
 func writeSetting(_ url: URL, _ text: String) -> Bool {
     do {
@@ -71,7 +80,7 @@ final class SettingsModel: ObservableObject {
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
     /// "off", "preset:<name>" or "custom:#RRGGBB"; the service reads it when playback starts and when it changes
-    @Published private(set) var glow = parseGlow(readSetting(glowFile))
+    @Published private(set) var glow = parseGlow(readGlowFile())
     /// Saves first and updates the UI only if that worked, so a failed write leaves the old state and picking again retries
     func setGlow(_ v: String) {
         if writeSetting(glowFile, v) { glow = v; if v.hasPrefix("custom:#") { lastCustom = v } }
@@ -80,7 +89,7 @@ final class SettingsModel: ObservableObject {
     private(set) var lastCustom: String?
     /// 設定視窗每次出現都重讀，外部改了檔（例如手動編輯）才會反映出來
     func reloadGlow() {
-        glow = parseGlow(readSetting(glowFile))
+        glow = parseGlow(readGlowFile())
         if glow.hasPrefix("custom:#") { lastCustom = glow }
     }
     init() { if glow.hasPrefix("custom:#") { lastCustom = glow } }
