@@ -101,6 +101,7 @@ summarize() {  # stamp end_code began_epoch
 # 保留 7 天：每段播放的 log 超過就刪；總事件記錄超過 1 MB 換檔；摘要只留最近 2000 列
 prune_logs() {
   find $LOGDIR -maxdepth 1 -type f -name 'pair-*' -mtime +7 -delete 2>/dev/null
+  rm -f $STATE/glow-*.jpg(N)  # 舊版每組顏色一個檔，現在只有 glow.jpg
   [[ -f $LOG && $(stat -f %z $LOG) -gt 1048576 ]] && mv -f $LOG $LOG.1
   # 摘要由 supervisor 追加：播放中不裁切，免得裁切中間追加的那列被蓋掉
   running || { [[ -f $SESSIONS ]] && (( $(wc -l < $SESSIONS) > 2001 )) && { head -1 $SESSIONS; tail -2000 $SESSIONS; } > $SESSIONS.$$ && mv -f $SESSIONS.$$ $SESSIONS }
@@ -181,7 +182,9 @@ send_cmd() {
   local fd
   sysopen -w -o nonblock -u fd $1 2>/dev/null || return 1
   syswrite -o $fd -- "$2"$'\n' 2>/dev/null
+  local rc=$?  # 回傳寫入結果，不是 close 的結果；寫不進去（管道滿）呼叫端才不會當成已送
   exec {fd}>&-
+  return $rc
 }
 
 # 喇叭目前這一代的管道後綴（用全域 rd）：起播時就在的沒有後綴，播放中加入的是 .<n>，reroute 成功時記在 cur-<ID>
@@ -245,6 +248,7 @@ typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400" cool "1E40FF 8A2BE2 00B4FF"
 GLOW_DELAY=${GLOW_DELAY:-2}  # SENDMETA 會把顏色重設成白色；是否要隔一段才送封面沒實測過，先等這幾秒
 typeset -A glow_sent  # 每個 cmd 管道收過什麼：「meta@<該送封面的 SECONDS>」或「art:<封面檔名>」；沒有這個鍵就是什麼都沒收過
 glow_rd=""
+glow_made=""  # glow.jpg 目前是哪組顏色畫的
 # glow 檔（使用者可寫）：off | preset:<名稱> | custom:#RRGGBB[,#RRGGBB[,#RRGGBB]]。印出顏色清單；其他內容一律當關，內容絕不當路徑用
 glow_colors() {
   local v=$(read_user $dir/glow | tr -d ' \n')
@@ -256,12 +260,12 @@ glow_colors() {
 # 每個 session 的每個管道：沒收過就送 SENDMETA、隔 GLOW_DELAY 秒再送 ARTWORK=；顏色換了只送新的 ARTWORK=。
 # 播放中改成 off 什麼都不送，下次起播才生效（已經亮著的燈沒有關掉的指令）
 glow_tick() {
-  local -a cols ids; local id p s jpg
+  local -a cols ids; local id p s jpg key
   if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_rd=""; return 0; fi
   [[ $rd != $glow_rd ]] && { glow_sent=(); glow_rd=$rd; }
   cols=(${=$(glow_colors)}); (( $#cols )) || return 0
-  jpg=$STATE/glow-${(j:-:)cols}.jpg
-  [[ -f $jpg ]] || $TOOL glowart $jpg $cols 2>/dev/null || return 0
+  jpg=$STATE/glow.jpg; key=${(j:-:)cols}  # 只留一張圖，顏色變了才原子換掉；送過什麼以顏色記，不以檔名記
+  [[ $key == $glow_made && -f $jpg ]] || { $TOOL glowart $jpg $cols 2>/dev/null || return 0; glow_made=$key; }
   ids=(${=$(head -c 64 $DEVFILE 2>/dev/null)})
   for id in $ids; do
     [[ $id == [0-9A-F](#c12) ]] || continue
@@ -270,9 +274,9 @@ glow_tick() {
     if [[ -z $s ]]; then
       send_cmd $p "TITLE=AirPlay Stereo"$'\n'"ARTIST=Mac"$'\n'"ITEMID=airplay-stereo"$'\n'"ACTION=SENDMETA" && glow_sent[$p]=meta@$(( SECONDS + GLOW_DELAY ))
     elif [[ $s == meta@* ]]; then
-      (( SECONDS >= ${s#meta@} )) && send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:${jpg:t}
-    elif [[ $s != art:${jpg:t} ]]; then
-      send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:${jpg:t}
+      (( SECONDS >= ${s#meta@} )) && send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:$key
+    elif [[ $s != art:$key ]]; then
+      send_cmd $p "ARTWORK=$jpg" && glow_sent[$p]=art:$key
     fi
   done
   true
