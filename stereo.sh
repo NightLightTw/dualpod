@@ -160,7 +160,7 @@ supervise() {
   done
 }
 
-zmodload zsh/system
+zmodload zsh/system zsh/datetime
 # 讀一般使用者可寫的小檔：不跟隨 symlink、非阻塞開啟（換成 FIFO 也不會讓 root 卡住），最多 64 bytes
 read_user() {
   local fd s=""
@@ -263,6 +263,11 @@ glow_tick() {
   local -a cols ids; local id p s jpg key
   if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_rd=""; return 0; fi
   [[ $rd != $glow_rd ]] && { glow_sent=(); glow_rd=$rd; }
+  # ready 比 START 早建：cliairplay 依序處理 cmd，SENDMETA 是阻塞的網路呼叫，排在 START 前會讓那台的 START 晚到、左右各自重新對時。
+  # 一定要等 start_ms 存在、且過了起播時刻再多 1 秒才碰任何管道（session 時鐘是 CLOCK_UPTIME_RAW 加 offset，和牆上時鐘差一點，1 秒餘裕涵蓋）。
+  # 播放中加入的喇叭不用另外擋：reroute 在 serve 迴圈裡同步跑到 T2 後才回來，加入那台的管道要等 START 確認後才進 DEVFILE
+  local sm=$(head -c 20 $rd/start_ms 2>/dev/null)
+  [[ $sm == <-> ]] && (( EPOCHREALTIME * 1000 >= sm + 1000 )) || return 0
   cols=(${=$(glow_colors)}); (( $#cols )) || return 0
   jpg=$STATE/glow.jpg; key=${(j:-:)cols}  # 只留一張圖，顏色變了才原子換掉；送過什麼以顏色記，不以檔名記
   [[ $key == $glow_made && -f $jpg ]] || { $TOOL glowart $jpg $cols 2>/dev/null || return 0; glow_made=$key; }
