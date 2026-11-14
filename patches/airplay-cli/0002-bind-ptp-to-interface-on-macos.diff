@@ -1,3 +1,5 @@
+Modified by DualPod, 2026-11: bind PTP ports 319/320 to the --if address on macOS.
+
 diff --git a/src/ap2_ptp.c b/src/ap2_ptp.c
 index 61011ec..c73a9ab 100644
 --- a/src/ap2_ptp.c

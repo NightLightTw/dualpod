@@ -1,10 +1,7 @@
 # DualPod
 
-Formerly AirPlay Stereo.
-
-A macOS menu bar app that sends all of your Mac's sound over AirPlay 2 to one or two speakers. With two speakers,
-one plays the left channel and the other the right, so two HomePod minis that can't be paired as a stereo pair
-(for example, different generations) still work as left and right. The Mac's own speakers can play along, aligned in time.
+A macOS menu bar app that plays your Mac's sound on two HomePod minis as left and right, even when they can't be
+paired as a stereo pair (for example, one of each generation). The Mac's own speakers can play along, aligned in time.
 
 中文安裝說明：[dist-README.txt](dist-README.txt)
 
@@ -17,29 +14,100 @@ and found out the two can't be set up as a stereo pair. That was annoying enough
 
 ## Requirements
 
-- Apple silicon Mac, macOS 14.4 or later (system audio capture needs 14.4)
-- Speakers on the same network. Tested with HomePod mini (1st and 2nd generation). It streams native AirPlay 2
-  with PTP timing, so other AirPlay 2 receivers may or may not work
-- An administrator password to install, update, or remove the background helper
+- A Mac with Apple silicon, on macOS 14.4 or later. Capturing system audio needs 14.4.
+- One or two HomePods on the same network as the Mac. Tested with HomePod mini, 1st and 2nd generation.
+  The full-size HomePod is listed too but hasn't been tested. Other AirPlay receivers aren't listed.
+- An administrator password to install, update, or remove the background helper.
 
 ## Install
 
-Download `DualPod.zip` from Releases and follow `安裝說明.txt` inside (Chinese and English).
-The app is ad-hoc signed and not notarized, so macOS blocks it the first time: open it from
-System Settings → Privacy & Security → Open Anyway.
+1. Download `DualPod-<version>.zip` from [Releases](https://github.com/NightLightTw/dualpod/releases), unzip it,
+   and drag `DualPod.app` to Applications.
+2. Open it. DualPod is free and isn't notarized by Apple, so macOS blocks it the first time with a message that Apple
+   could not verify it. That message means the app hasn't been through Apple's paid notarization, not that malware was
+   found. The source is in this repository if you'd rather build it yourself.
+   - macOS 15 or later: click Done, open System Settings → Privacy & Security, scroll down, click Open Anyway next to
+     DualPod, and enter your password.
+   - macOS 14: Control-click the app in Finder, choose Open, then click Open.
+3. DualPod asks "Install the background helper?". Click Install and enter your password.
+4. Click the DualPod icon (two overlapping rings) in the menu bar and select your speakers. They appear within a minute.
+5. The first time it plays, macOS asks for permission to record system audio. Allow it, or the speakers stay silent.
 
-## What it does
+### Permissions, and why
 
-- Lists AirPlay receivers found on the network. Other Macs are left out.
-- Plays to any mix of up to two speakers and This Mac. Two speakers play left and right.
-- Volume for each speaker, a test chime to tell left from right, and a swap button.
-- Auto-align: shifts the Mac's speakers until they line up with the HomePods, using the microphone.
-- A watchdog restarts both speakers together when one of them falls out of step.
-- Quitting the app stops streaming and returns sound to the Mac.
+| What | Why | If you said no |
+|---|---|---|
+| Administrator password | Installs the background helper that does the streaming and binds the network ports AirPlay timing needs. After that, switching speakers needs no password | Nothing streams |
+| Record system audio | Captures what the Mac is playing so it can be sent to the speakers. It doesn't record the microphone, and the sound goes only to the speakers you selected | System Settings → Privacy & Security → Screen & System Audio Recording, turn on DualPod or audiotee, then deselect and reselect a speaker |
+| Microphone (optional) | Only for Align Automatically, which listens to the speakers for up to a minute | System Settings → Privacy & Security → Microphone |
 
-Measured on one setup (two HomePod minis, three runs each against Apple Music, same microphone position):
-end-to-end latency about 0.27 to 0.30 s (Apple Music to the same speakers: 0.63 to 0.73 s),
-left/right offset 0.7 to 3.3 ms (Apple Music: 0.5 to 2.2 ms). Your numbers will differ with the room and the network.
+After installing, System Settings → General → Login Items & Extensions lists a background item named **zsh**. That is
+DualPod's helper (a shell script run by launchd). Turning it off stops DualPod from playing.
+
+### Home app setting
+
+DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV and
+set "Allow Speaker & TV Access" to Everyone or Anyone on the Same Network, with no password. If access is limited to
+people sharing the home, or a password is set, the HomePods stay silent and DualPod doesn't say why.
+
+## Usage
+
+- Select two HomePods: one plays left, the other right. To check which is which, open Settings… → Audio → Stereo Pair
+  and click a speaker. It chimes from that side. If they're backwards, click Swap Left and Right.
+- Select This Mac too: the Mac's speakers play the full mix along with the HomePods. If you hear an echo, use
+  Settings… → Audio → This Mac's Speakers → Align Automatically… in a quiet room.
+- Each speaker has its own volume slider in the menu.
+- Settings… → Glow lights up the top of the HomePods while streaming (Sound Glow). It needs HomePod software 27.2 and
+  Sound Glow turned on in the Home app.
+- Quit DualPod stops streaming and returns sound to the Mac.
+
+## Known limitations
+
+- About 0.3 seconds of delay. Fine for music, but video will look out of sync with the sound.
+- If the stream keeps failing, for example because Wi-Fi is down, DualPod gives up after more than 5 restarts in
+  5 minutes. Deselect and reselect a speaker when the network is back.
+- If another device (an iPhone, another Mac) starts playing to one of the HomePods, DualPod and that device take turns
+  grabbing it. Stop one of them.
+- With a VPN or several network interfaces active, DualPod may stream from the wrong one and the speakers stay silent.
+- Left/right timing between the two HomePods measured 0.7 to 3.3 ms on one setup. Apple Music sending the same sound to
+  both measured 0.5 to 2.2 ms.
+
+## Troubleshooting
+
+1. The menu says the background helper stopped, or a new version is available: click the menu item to reinstall or
+   update it.
+2. Playing but no sound: check the recording permission and the Home app setting above.
+3. A HomePod doesn't appear: make sure it's on and on the same network as the Mac. The list refreshes about once a
+   minute.
+4. Still stuck: Settings… → General → Troubleshooting → Open Log Folder, or Copy Diagnostics to report it.
+
+## Uninstall
+
+Settings… → General → Background helper → Manage → Remove…, then move DualPod to the Trash.
+
+If the app is already gone, remove the helper in Terminal:
+
+```bash
+sudo launchctl bootout system/local.airplay-stereo
+sudo rm -f /Library/LaunchDaemons/local.airplay-stereo.plist
+sudo rm -rf "/Library/Application Support/AirPlayStereo"
+rm -rf ~/Library/Application\ Support/AirPlayStereo
+```
+
+The names say AirPlay Stereo because that was DualPod's earlier name.
+
+## Reporting a problem
+
+Open an [issue](https://github.com/NightLightTw/dualpod/issues) with your Mac model, macOS version, HomePod models and
+their software version, the DualPod version (in the Releases file name), and what you did before it went wrong.
+Paste the output of Copy Diagnostics if you can. It replaces IP addresses, device IDs, and speaker names with
+placeholders, but read it before posting.
+
+## Privacy
+
+- DualPod doesn't connect to the internet and collects nothing. It finds speakers with Bonjour on the local network and
+  sends sound only to the speakers you select.
+- Logs stay on the Mac, under `/Library/Application Support/AirPlayStereo/logs`. Session logs are deleted after 7 days.
 
 ## How it works
 
@@ -50,32 +118,35 @@ system audio ──audiotee (Core Audio process tap)──▶ stereotool split �
                         one PTP clock (cliairplay --ptp-daemon), one shared start time
 ```
 
-- `stereo.sh` is the root background helper (a LaunchDaemon). It finds speakers, starts and watches the stream,
-  and reads the app's choices from files in `~/Library/Application Support/AirPlayStereo/`.
+- `stereo.sh` is the background helper, a root LaunchDaemon. It finds speakers, starts and watches the stream, and reads
+  the app's choices from files in `~/Library/Application Support/AirPlayStereo/`.
 - `run_pair.sh` starts one streaming session.
 - `app/` is the menu bar app (Swift, AppKit and SwiftUI). It installs the helper through macOS's own password dialog.
-- `tools/stereotool` keeps the clock and splits the channels; `tools/localplay` plays the Mac's share in time.
+- `tools/stereotool` keeps the clock and splits the channels. `tools/localplay` plays the Mac's share in time.
 
 ## Build from source
 
 ```bash
 zsh scripts/fetch-deps.sh      # clone airplay-cli and audiotee, apply patches/, build them
 zsh app/build.sh               # app/DualPod.app for yourself
-zsh app/build.sh dist          # dist/DualPod.zip for others (signed, with install notes)
 ```
 
-Requires Xcode or the Command Line Tools. The measurement tools are for development only: they need Python with
-numpy and scipy, `swiftc tools/rec.swift -o tools/rec`, `mkdir signals checks && python measure.py gen signals`,
-and Homebrew ffmpeg for the test and measure modes of `run_pair.sh`.
+Requires an Apple silicon Mac and Xcode or the Command Line Tools. A release zip comes from a fresh clone at a `vX.Y.Z` tag:
+`zsh scripts/fetch-deps.sh && zsh app/build.sh dist` writes `dist/DualPod-X.Y.Z.zip`, and refuses to build if the
+checkout has uncommitted changes or the dependencies differ from the pinned commits plus `patches/`.
 
-## Privacy
+The measurement tools are for development only. They need Python with numpy and scipy,
+`swiftc tools/rec.swift -o tools/rec`, `mkdir signals checks && python measure.py gen signals`, and Homebrew ffmpeg for
+the test and measure modes of `run_pair.sh`.
 
-- Streams only to the speakers you select. Finding speakers uses Bonjour queries on the local network.
-- Logs stay on the Mac, under `/Library/Application Support/AirPlayStereo/logs`. Per-session logs are deleted after
-  7 days, the event log rolls over at 1 MB, and the session summary keeps the last 2000 rows.
-- "Copy Diagnostics" in Settings replaces IP addresses, device IDs, host names, and the names of speakers it found
-  with placeholders. Read it before you send it: it can't catch everything.
+## License and credits
 
-## License
+Copyright (C) 2026 NightLightTw. DualPod is free software under the GNU General Public License, version 3. See
+[LICENSE](LICENSE).
 
-GNU General Public License, version 3. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+DualPod streams with [cliairplay (airplay-cli)](https://github.com/music-assistant/airplay-cli) from Music Assistant
+and captures audio with [audiotee](https://github.com/makeusabrew/audiotee) by Nick Payne, both with small patches.
+Their licenses, the exact commits, and what was changed are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+DualPod is an independent project and is not affiliated with, endorsed by, or sponsored by Apple Inc. Apple, AirPlay,
+HomePod, HomePod mini, and Mac are trademarks of Apple Inc., registered in the U.S. and other countries and regions.

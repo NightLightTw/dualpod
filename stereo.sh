@@ -203,7 +203,7 @@ reap_client() {
 
 my_ip() { ipconfig getifaddr $(route -n get default 2>/dev/null | awk '/interface:/ {print $2}') 2>/dev/null; }
 
-# 找區網裡的 AirPlay 接收器（不含這台 Mac），寫成 SPEAKERS 與每台的 TXT 紀錄。
+# 找區網裡的 HomePod，寫成 SPEAKERS 與每台的 TXT 紀錄。
 # 名稱與 TXT 都是網路上別人廣播的內容：只當資料存，ID 必須是 12 位十六進位、IP 必須是 IPv4 才收
 discover() {
   # 一次只跑一個（mkdir 是原子的）；暫存檔帶 PID，不會互相覆蓋。當機留下的鎖超過 5 分鐘就當作失效
@@ -222,8 +222,9 @@ discover() {
     txt=$(print -r -- $out | grep -m1 'deviceid=' | sed 's/^ *//')
     key=$(print -r -- $txt | sed -n 's/.*deviceid=\([0-9A-Fa-f:]*\).*/\1/p' | tr -d ':' | tr a-f A-F)
     [[ $key == [0-9A-F](#c12) && -n $host ]] || continue
-    # 其他 Mac 也會廣播 AirPlay（螢幕鏡像接收），在別人的網路上就是別人的電腦，不列出來免得誤送
-    [[ $txt == *model=Mac* ]] && continue
+    # 只列 HomePod（model=AudioAccessory…）：播放設定、Sound Glow 都只在 HomePod mini 上驗證過，
+    # Apple TV、電視、別人的 Mac 選了多半沒聲音或會誤送到別人的裝置
+    [[ $txt == *model=AudioAccessory* ]] || continue
     ip=$( (dns-sd -G v4 "$host" & p=$!; sleep 1.5; kill $p) 2>/dev/null | awk '$2 == "Add" { print $6; exit }')
     [[ $ip == <0-255>.<0-255>.<0-255>.<0-255> && $ip != $me && $ip != 127.* ]] || continue  # 這台 Mac 自己會解析成 127.0.0.1
     grep -q "^$key"$'\t' $tmp && continue  # 同一台改名時新舊名稱會同時廣播：同一個 ID 只留一筆
@@ -234,7 +235,12 @@ discover() {
   if [[ -f $SPEAKERS ]]; then  # 用檔名分辨兩個輸入（NR == FNR 遇到空的第一個檔會判錯）
     awk -F'\t' -v cutoff=$(( $(date +%s) - 600 )) 'FILENAME == ARGV[1] { seen[$1] = 1; next }
       !($1 in seen) && $4 + 0 >= cutoff && $3 !~ /^$/ { seen[$1] = 1; print }' $tmp $SPEAKERS > $tmp.old 2>/dev/null
-    cat $tmp.old >> $tmp; rm -f $tmp.old
+    # 舊版留下的清單可能有非 HomePod：補回時一樣只留 HomePod
+    local k rest
+    while IFS=$'\t' read -r k rest; do
+      grep -q 'model=AudioAccessory' $STATE/txt-$k 2>/dev/null && print -r -- "$k"$'\t'"$rest"
+    done < $tmp.old >> $tmp
+    rm -f $tmp.old
   fi
   sort -t$'\t' -k3 $tmp > $tmp.sorted && mv -f $tmp.sorted $SPEAKERS; rm -f $tmp
 }

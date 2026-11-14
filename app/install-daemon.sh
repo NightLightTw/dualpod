@@ -11,7 +11,7 @@ umask 022  # 安裝資料夾要讓一般使用者讀得到（App 查狀態、降
 # 出錯時告訴 App 是哪一行（App 只看得到 stderr）；還沒換上新版前出錯，就把準備到一半的東西清掉
 trap 'echo "install-daemon.sh 第 $LINENO 行失敗" >&2' ZERR
 STAGED=""
-trap '[[ -n $STAGED ]] && rm -rf "$DEST.new" ${TMPPLIST:-}' EXIT
+trap '[[ -n $STAGED ]] && rm -rf "$DEST.new"; [[ -n ${TMPD:-} ]] && rm -rf "$TMPD"' EXIT
 LABEL=local.airplay-stereo
 PLIST=/Library/LaunchDaemons/$LABEL.plist
 DEST="/Library/Application Support/AirPlayStereo"
@@ -32,7 +32,8 @@ if [[ ${1:-} == remove ]]; then  # 全機的服務不靠帳號查詢也能移除
   u=${SUDO_USER:-${INSTALL_USER:-}}
   if [[ $u == [A-Za-z0-9._-]## ]] && id -u $u >/dev/null 2>&1; then
     h=$(dscl . -read /Users/$u NFSHomeDirectory 2>/dev/null | sed 's/^NFSHomeDirectory: //')
-    [[ -n $h ]] && rm -f "$h/Library/Application Support/AirPlayStereo/want"
+    # 用那個帳號的身分刪：路徑在使用者資料夾裡，中間若被換成 symlink，root 刪下去會刪到別處
+    [[ -n $h ]] && sudo -u $u rm -f "$h/Library/Application Support/AirPlayStereo/want" || true
   fi
   echo "removed"; exit 0
 fi
@@ -63,8 +64,10 @@ chown -R root:wheel "$NEW"; chmod -R go-w,a+rX "$NEW"
 # 使用者已在密碼視窗同意安裝，所以只清掉我們自己這份安裝目錄的標記
 xattr -dr com.apple.quarantine "$NEW" 2>/dev/null || true
 
-# plist 用 plutil 產生：家目錄有 & < 這類字元也不會壞
-TMPPLIST=$(mktemp /tmp/airplay-stereo-plist.XXXXXX)
+# plist 用 plutil 產生：家目錄有 & < 這類字元也不會壞。
+# 暫存檔和舊 plist 的備份都放在 mktemp -d 建的資料夾（只有 root 能進）：/tmp 裡猜得到的檔名可能被別的帳號先放 symlink
+TMPD=$(mktemp -d /tmp/dualpod-install.XXXXXX)
+TMPPLIST=$TMPD/plist
 plutil -create xml1 $TMPPLIST
 plutil -insert Label -string $LABEL $TMPPLIST
 plutil -insert ProgramArguments -array $TMPPLIST
@@ -90,7 +93,7 @@ if [[ -d $DEST ]]; then
 fi
 mkdir -p "$NEW/logs"
 mv "$NEW" "$DEST"
-[[ -f $PLIST ]] && cp -p $PLIST $TMPPLIST.old
+[[ -f $PLIST ]] && cp -p $PLIST $TMPD/plist.old
 mv -f $TMPPLIST $PLIST
 if ! launchctl bootstrap system $PLIST; then
   echo "新版起不來，換回舊版"
@@ -98,9 +101,9 @@ if ! launchctl bootstrap system $PLIST; then
   if [[ -d $OLD ]]; then
     for keep in state logs; do [[ -d $DEST/$keep ]] && mv "$DEST/$keep" "$OLD/"; done
     rm -rf "$DEST"; mv "$OLD" "$DEST"
-    [[ -f $TMPPLIST.old ]] && mv -f $TMPPLIST.old $PLIST && launchctl bootstrap system $PLIST || true
+    [[ -f $TMPD/plist.old ]] && mv -f $TMPD/plist.old $PLIST && launchctl bootstrap system $PLIST || true
   fi
   exit 1
 fi
-rm -rf "$OLD" $TMPPLIST.old
+rm -rf "$OLD"
 echo "installed: $DEST"

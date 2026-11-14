@@ -3,6 +3,7 @@
 DualPod is licensed under the GNU General Public License, version 3 (see [LICENSE](LICENSE)).
 Its release bundles two programs built from other projects. Both are fetched from upstream and patched by
 [scripts/fetch-deps.sh](scripts/fetch-deps.sh); the patches are in [patches/](patches).
+The first line of each patch states who made the change and when (DualPod's changes date from November 2026).
 
 ## cliairplay (airplay-cli)
 

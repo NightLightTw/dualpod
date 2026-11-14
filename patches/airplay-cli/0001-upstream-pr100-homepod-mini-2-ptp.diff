@@ -1,3 +1,5 @@
+Change by Jonathan Delgado, proposed in music-assistant/airplay-cli pull request #100. Applied by DualPod, 2026-11.
+
 diff --git a/DESIGN.md b/DESIGN.md
 index 5e67fb8..7fd6465 100644
 --- a/DESIGN.md

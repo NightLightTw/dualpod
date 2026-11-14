@@ -6,6 +6,9 @@
 set -eu
 ROOT=${0:A:h:h}
 export MACOSX_DEPLOYMENT_TARGET=14.4  # 系統錄音（process tap）從 14.4 才有
+# 殼層裡的編譯旗標（例如 Homebrew 教人設的 CPPFLAGS）會被編進執行檔，發佈版就不再只來自這份原始碼
+unset CFLAGS CPPFLAGS CXXFLAGS LDFLAGS EXTRA_CFLAGS EXTRA_LDFLAGS MAKEFLAGS MFLAGS
+[[ $(uname -m) == arm64 ]] || { echo "需要 Apple 晶片的 Mac：執行檔只做 arm64"; exit 1; }
 
 fetch() {  # 資料夾 網址 commit
   local dir=$ROOT/$1 url=$2 rev=$3 p

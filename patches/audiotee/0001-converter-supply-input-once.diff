@@ -1,3 +1,5 @@
+Modified by DualPod, 2026-11: hand each input chunk to the sample-rate converter once.
+
 diff --git a/Sources/AudioTeeCore/Core/AudioFormatConverter.swift b/Sources/AudioTeeCore/Core/AudioFormatConverter.swift
 index 5a52284..29cdac1 100644
 --- a/Sources/AudioTeeCore/Core/AudioFormatConverter.swift

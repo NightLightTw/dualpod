@@ -573,7 +573,7 @@ final class App: NSObject, NSApplicationDelegate {
             p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             // Paths and the user name go in as arguments and through `quoted form of`, never spliced into the script
             p.arguments = ["-e", "on run argv",
-                           "-e", "set cmd to \"INSTALL_USER=\" & quoted form of item 2 of argv & \" /bin/zsh \" & quoted form of item 1 of argv",
+                           "-e", "set cmd to \"INSTALL_USER=\" & quoted form of item 2 of argv & \" /bin/zsh -f \" & quoted form of item 1 of argv",
                            "-e", "if item 3 of argv is \"remove\" then set cmd to cmd & \" remove\"",
                            "-e", "do shell script cmd with prompt (item 4 of argv) with administrator privileges",
                            "-e", "end run",
