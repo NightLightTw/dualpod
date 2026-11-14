@@ -155,7 +155,7 @@ final class App: NSObject, NSApplicationDelegate {
     var devices: [String] { speakers.map(\.id) + ["Mac"] }  // menu order; the want file is ids then "Mac"
     var deviceItems: [String: NSMenuItem] = [:]
     var menu = NSMenu()
-    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     var header = NSMenuItem.sectionHeader(title: "")
     let warning = NSMenuItem()
     let lastLine = NSMenuItem()
