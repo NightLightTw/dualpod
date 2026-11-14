@@ -47,13 +47,13 @@ DualPod 不支援 HomeKit 配對與喇叭密碼。請在「家庭」App 的「�
 - 開著 VPN 或同時有多個網路時，可能用錯網路，喇叭會沒有聲音。請關掉 VPN，再取消、重新勾選一次喇叭。
 
 疑難排解
-1. 選單顯示背景服務停止，或出現「更新背景服務…」（換了新版 DualPod 之後）：點那一項重新安裝或更新。
+1. 選單顯示背景服務停止，或出現「更新背景服務…」（App 內附的背景服務和已安裝的不同，通常是換了版本之後）：點那一項重新安裝或更新。
 2. 顯示播放中卻沒有聲音：檢查上面的「錄製系統聲音」權限與「家庭」App 設定，有開 VPN 先關掉。
 3. 找不到 HomePod：確認它開著、和 Mac 在同一個網路。清單大約每分鐘更新一次。
-4. 還是不行：「設定… → 一般 → 疑難排解」可以打開記錄資料夾，或按「複製診斷資訊」回報問題。
+4. 還是不行：「設定… → 一般 → 疑難排解」可以按「打開 log 資料夾」，或按「複製診斷資訊」回報問題。
 
 移除
-「設定… → 一般 → 背景服務 → 管理 → 移除…」，再把 App 丟到垃圾桶。
+「設定… → 一般 → 背景服務 → 管理 → 移除…」，再把 App 丟到垃圾桶。背景服務停止或需要更新時，那一頁沒有「管理」，改成「移除背景服務 → 移除…」。
 App 已經刪掉的話，在「終端機」執行下面四行（名稱是 DualPod 的舊名 AirPlay Stereo）。終端機在「應用程式 → 工具程式」裡。一次貼一行，按 Return。第一個 sudo 會要 Mac 密碼，輸入時畫面不會顯示字元。
   sudo launchctl bootout system/local.airplay-stereo
   sudo rm -f /Library/LaunchDaemons/local.airplay-stereo.plist
@@ -123,12 +123,12 @@ Known limitations
 - With a VPN or several active network interfaces, DualPod may stream from the wrong one and the speakers stay silent. Turn off the VPN, then deselect and reselect a speaker.
 
 Troubleshooting
-- The menu says the background helper stopped, or offers to update it (after you install a newer DualPod): click that item.
+- The menu says the background helper stopped, or offers to update it (this DualPod carries a different helper than the installed one, usually after you install another version): click that item.
 - Playing but no sound: check the recording permission and the Home app setting above, and turn off any VPN.
 - A HomePod doesn't appear: make sure it's on and on the same network. The list refreshes about once a minute.
 - Still stuck: Settings… → General → Troubleshooting has Open Log Folder and Copy Diagnostics.
 
-Uninstall: Settings… → General → Background helper → Manage → Remove…, then move the app to the Trash.
+Uninstall: Settings… → General → Background helper → Manage → Remove…, then move the app to the Trash. When the helper is stopped or needs an update, that page shows Remove the helper → Remove… instead of Manage.
 If the app is already gone, run these in Terminal (AirPlay Stereo is DualPod's earlier name). Terminal is in Applications → Utilities. Paste one line at a time and press Return. The first sudo asks for your Mac password, and nothing appears on screen while you type it.
   sudo launchctl bootout system/local.airplay-stereo
   sudo rm -f /Library/LaunchDaemons/local.airplay-stereo.plist

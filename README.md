@@ -81,8 +81,8 @@ can change it in Settings… → General → Language.
 
 ## Troubleshooting
 
-1. The menu says the background helper stopped, or offers to update it (after you install a newer DualPod): click that
-   menu item to reinstall or update the helper.
+1. The menu says the background helper stopped, or offers to update it (this DualPod carries a different helper than the
+   installed one, usually after you install another version): click that menu item to reinstall or update the helper.
 2. Playing but no sound: check the recording permission and the Home app setting above, and turn off any VPN.
 3. A HomePod doesn't appear: make sure it's on and on the same network as the Mac. The list refreshes about once a
    minute.
@@ -90,7 +90,8 @@ can change it in Settings… → General → Language.
 
 ## Uninstall
 
-Settings… → General → Background helper → Manage → Remove…, then move DualPod to the Trash.
+Settings… → General → Background helper → Manage → Remove…, then move DualPod to the Trash. When the helper is
+stopped or needs an update, that page shows Remove the helper → Remove… instead of Manage.
 
 If the app is already gone, remove the helper in Terminal. The names say AirPlay Stereo because that was DualPod's
 earlier name. Open Terminal (Applications → Utilities), paste the lines one at a time, and press Return after each.
