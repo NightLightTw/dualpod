@@ -14,10 +14,11 @@ and found out the two can't be set up as a stereo pair. That was annoying enough
 
 ## Requirements
 
-- A Mac with Apple silicon, on macOS 14.4 or later. Capturing system audio needs 14.4.
+- A Mac with Apple silicon, on macOS 14.4 or later.
 - One or two HomePods on the same network as the Mac. Tested with HomePod mini, 1st and 2nd generation.
-  The full-size HomePod is listed too but hasn't been tested. Other AirPlay receivers aren't listed.
-- An administrator password to install, update, or remove the background helper.
+  The full-size HomePod shows up in DualPod's speaker list but hasn't been tested. Other AirPlay receivers don't show
+  up.
+- An administrator password to install, update, or remove the background helper (the part that does the streaming).
 
 ## Install
 
@@ -30,16 +31,19 @@ and found out the two can't be set up as a stereo pair. That was annoying enough
      DualPod, and enter your password.
    - macOS 14: Control-click the app in Finder, choose Open, then click Open.
 3. DualPod asks "Install the background helper?". Click Install and enter your password.
-4. Click the DualPod icon (two overlapping rings) in the menu bar and select your speakers. They appear within a minute.
-5. The first time it plays, macOS asks for permission to record system audio. Allow it, or the speakers stay silent.
+4. Before selecting speakers, set the Home app to allow speaker access without a password, as described in
+   [Home app setting](#home-app-setting). Otherwise the HomePods stay silent.
+5. Click the DualPod icon (two overlapping rings) in the menu bar. HomePods on your network appear within a minute.
+   Select the ones to play on.
+6. The first time it plays, macOS asks for permission to record system audio. Allow it, or the speakers stay silent.
 
 ### Permissions, and why
 
 | What | Why | If you said no |
 |---|---|---|
 | Administrator password | Installs the background helper that does the streaming and binds the network ports AirPlay timing needs. After that, switching speakers needs no password | Nothing streams |
-| Record system audio | Captures what the Mac is playing so it can be sent to the speakers. It doesn't record the microphone, and the sound goes only to the speakers you selected | System Settings → Privacy & Security → Screen & System Audio Recording, turn on DualPod or audiotee, then deselect and reselect a speaker |
-| Microphone (optional) | Only for Align Automatically, which listens to the speakers for up to a minute | System Settings → Privacy & Security → Microphone |
+| Record system audio | Captures what the Mac is playing so it can be sent to the speakers. It doesn't record the microphone, and the sound goes only to the speakers you selected | System Settings → Privacy & Security → Screen & System Audio Recording, turn on DualPod or audiotee (the audio capture tool inside DualPod), then deselect and reselect a speaker |
+| Microphone (optional) | Only for Align Automatically, which lines up the Mac's speakers with the HomePods. It listens to the speakers for up to a minute | System Settings → Privacy & Security → Microphone |
 
 After installing, System Settings → General → Login Items & Extensions lists a background item named **zsh**. That is
 DualPod's helper (a shell script run by launchd). Turning it off stops DualPod from playing.
@@ -47,11 +51,15 @@ DualPod's helper (a shell script run by launchd). Turning it off stops DualPod f
 ### Home app setting
 
 DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV and
-set "Allow Speaker & TV Access" to Everyone or Anyone on the Same Network, with no password. If access is limited to
+set "Allow Speaker & TV Access" to Anyone on the Same Network (or Everyone), with no password. If access is limited to
 people sharing the home, or a password is set, the HomePods stay silent and DualPod doesn't say why.
 
 ## Usage
 
+Settings… is in the DualPod menu in the menu bar, not in System Settings. The app follows the system language, and you
+can change it in Settings… → General → Language.
+
+- Select one HomePod: it plays the full stereo mix.
 - Select two HomePods: one plays left, the other right. To check which is which, open Settings… → Audio → Stereo Pair
   and click a speaker. It chimes from that side. If they're backwards, click Swap Left and Right.
 - Select This Mac too: the Mac's speakers play the full mix along with the HomePods. If you hear an echo, use
@@ -69,14 +77,13 @@ people sharing the home, or a password is set, the HomePods stay silent and Dual
 - If another device (an iPhone, another Mac) starts playing to one of the HomePods, DualPod and that device take turns
   grabbing it. Stop one of them.
 - With a VPN or several network interfaces active, DualPod may stream from the wrong one and the speakers stay silent.
-- Left/right timing between the two HomePods measured 0.7 to 3.3 ms on one setup. Apple Music sending the same sound to
-  both measured 0.5 to 2.2 ms.
+  Turn off the VPN, then deselect and reselect a speaker.
 
 ## Troubleshooting
 
-1. The menu says the background helper stopped, or a new version is available: click the menu item to reinstall or
-   update it.
-2. Playing but no sound: check the recording permission and the Home app setting above.
+1. The menu says the background helper stopped, or offers to update it (after you install a newer DualPod): click that
+   menu item to reinstall or update the helper.
+2. Playing but no sound: check the recording permission and the Home app setting above, and turn off any VPN.
 3. A HomePod doesn't appear: make sure it's on and on the same network as the Mac. The list refreshes about once a
    minute.
 4. Still stuck: Settings… → General → Troubleshooting → Open Log Folder, or Copy Diagnostics to report it.
@@ -85,7 +92,9 @@ people sharing the home, or a password is set, the HomePods stay silent and Dual
 
 Settings… → General → Background helper → Manage → Remove…, then move DualPod to the Trash.
 
-If the app is already gone, remove the helper in Terminal:
+If the app is already gone, remove the helper in Terminal. The names say AirPlay Stereo because that was DualPod's
+earlier name. Open Terminal (Applications → Utilities), paste the lines one at a time, and press Return after each.
+The first `sudo` asks for your Mac password, and nothing appears on screen while you type it.
 
 ```bash
 sudo launchctl bootout system/local.airplay-stereo
@@ -93,8 +102,6 @@ sudo rm -f /Library/LaunchDaemons/local.airplay-stereo.plist
 sudo rm -rf "/Library/Application Support/AirPlayStereo"
 rm -rf ~/Library/Application\ Support/AirPlayStereo
 ```
-
-The names say AirPlay Stereo because that was DualPod's earlier name.
 
 ## Reporting a problem
 
@@ -124,20 +131,34 @@ system audio ──audiotee (Core Audio process tap)──▶ stereotool split �
 - `app/` is the menu bar app (Swift, AppKit and SwiftUI). It installs the helper through macOS's own password dialog.
 - `tools/stereotool` keeps the clock and splits the channels. `tools/localplay` plays the Mac's share in time.
 
+On one test setup, the timing gap between the left and right HomePods measured 0.7 to 3.3 ms. Apple Music sending the
+same sound to both measured 0.5 to 2.2 ms, so DualPod's left/right timing is close to Apple Music's.
+
 ## Build from source
 
 ```bash
-zsh scripts/fetch-deps.sh      # clone airplay-cli and audiotee, apply patches/, build them
+zsh scripts/fetch-deps.sh      # clone airplay-cli (cliairplay) and audiotee, apply patches/, build them
 zsh app/build.sh               # app/DualPod.app for yourself
 ```
 
-Requires an Apple silicon Mac and Xcode or the Command Line Tools. A release zip comes from a fresh clone at a `vX.Y.Z` tag:
-`zsh scripts/fetch-deps.sh && zsh app/build.sh dist` writes `dist/DualPod-X.Y.Z.zip`, and refuses to build if the
-checkout has uncommitted changes or the dependencies differ from the pinned commits plus `patches/`.
+Requires an Apple silicon Mac and Xcode or the Command Line Tools.
 
-The measurement tools are for development only. They need Python with numpy and scipy,
-`swiftc tools/rec.swift -o tools/rec`, `mkdir signals checks && python measure.py gen signals`, and Homebrew ffmpeg for
-the test and measure modes of `run_pair.sh`.
+Release zips are built from a fresh clone checked out at a `vX.Y.Z` tag:
+
+```bash
+zsh scripts/fetch-deps.sh && zsh app/build.sh dist   # writes dist/DualPod-X.Y.Z.zip
+```
+
+The dist build refuses to run if the checkout has uncommitted changes, or if the dependencies differ from the pinned
+commits plus `patches/`.
+
+The measurement tools are for development only, used by the test and measure modes of `run_pair.sh`. They need Python
+with numpy and scipy, and Homebrew ffmpeg. Set them up with:
+
+```bash
+swiftc tools/rec.swift -o tools/rec
+mkdir signals checks && python measure.py gen signals
+```
 
 ## License and credits
 

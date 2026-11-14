@@ -89,7 +89,7 @@ if [[ ${1:-} == dist ]]; then
   PKG="$OUT/DualPod"
   mkdir -p "$PKG"; mv "$APP" "$PKG/"; cp ../dist-README.txt "$PKG/安裝說明.txt"
   # GPLv3 與上游授權條款要跟著執行檔一起給；原始碼在 GitHub repo
-  cp ../LICENSE ../THIRD_PARTY_NOTICES.md "$PKG/"; cp ../third_party/cliairplay-THIRD_PARTY_NOTICES.md "$PKG/"
+  cp ../LICENSE ../THIRD_PARTY_NOTICES.md "$PKG/"; mkdir "$PKG/third_party"; cp ../third_party/cliairplay-THIRD_PARTY_NOTICES.md "$PKG/third_party/"  # 和 repo 同路徑，NOTICES 裡的連結才對得上
   mkdir -p ../dist; ZIP=../dist/DualPod-$VERSION.zip; rm -f $ZIP
   ditto -c -k --norsrc --keepParent "$PKG" $ZIP
   echo "dist: ${ZIP:A}"
