@@ -252,13 +252,41 @@ final class App: NSObject, NSApplicationDelegate {
         }
     }
 
+    // 選單列圖示：兩個重疊圓環（和 App 圖示同一個意象），播放中兩側各加兩道往外的弧線。
+    // 兩種狀態同一個 30×18 畫布，開始播放時圖示寬度不變，不會把旁邊的選單列圖示擠開
+    static let iconIdle = statusIcon(waves: false)
+    static let iconPlaying = statusIcon(waves: true)
+    static func statusIcon(waves: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: 30, height: 18), flipped: true) { _ in
+            NSColor.black.setStroke()
+            for x in [12.1, 17.9] {
+                let ring = NSBezierPath(ovalIn: NSRect(x: x - 4.5, y: 4.5, width: 9, height: 9))
+                ring.lineWidth = 1.6
+                ring.stroke()
+            }
+            guard waves else { return true }
+            for r in [7.6, 10.2] {
+                for (cx, start) in [(12.1, 135.0), (17.9, -45.0)] {
+                    let arc = NSBezierPath()
+                    arc.appendArc(withCenter: NSPoint(x: cx, y: 9), radius: r, startAngle: start, endAngle: start + 90)
+                    arc.lineWidth = 1.5
+                    arc.lineCapStyle = .round
+                    arc.stroke()
+                }
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "DualPod"
+        return image
+    }
+
     func render(_ lines: [String]) {
         let first = lines.first ?? ""
         let missing = first == "missing" || first == "noservice"
         let shown = pending?.want ?? actual
         let streaming = shown.contains { $0 != "Mac" }
-        item.button?.image = NSImage(systemSymbolName: streaming ? "hifispeaker.2.fill" : "hifispeaker.2",
-                                     accessibilityDescription: "DualPod")
+        item.button?.image = streaming ? Self.iconPlaying : Self.iconIdle
         header.title = pending != nil ? t("Output · switching…", "輸出 · 切換中…")
             : streaming ? t("Output · ~0.3 s latency", "輸出 · 延遲約 0.3 秒")
             : speakers.isEmpty ? t("Output · looking for speakers…", "輸出 · 正在尋找喇叭…") : t("Output", "輸出")
