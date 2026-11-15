@@ -2,6 +2,8 @@
 
 A macOS menu bar app that plays your Mac's sound on two HomePod minis as left and right, even when they can't be paired as a stereo pair (for example, one of each generation). The Mac's own speakers can play along, aligned in time.
 
+<img src="docs/menu.png" width="279" alt="DualPod menu: two HomePod minis playing left and right, plus This Mac">
+
 中文安裝說明：[dist-README.txt](dist-README.txt)
 
 ## Why this exists
@@ -51,6 +53,8 @@ Settings… is in the DualPod menu in the menu bar, not in System Settings. The 
 - Each speaker has its own volume slider in the menu.
 - Settings… → Glow lights up the top of the HomePods while streaming (Sound Glow). It needs HomePod software 27.2 and Sound Glow turned on in the Home app.
 - Quit DualPod stops streaming and returns sound to the Mac.
+
+<img src="docs/glow.png" width="400" alt="DualPod Settings, Glow pane with color presets">
 
 ## Known limitations
 
