@@ -72,6 +72,8 @@ cp ../run_pair.sh ../stereo.sh install-daemon.sh "$RT/"
 cp ../airplay-cli/bin/cliairplay-macos-arm64 "$RT/airplay-cli/bin/"
 cp ../audiotee/.build/release/audiotee "$RT/audiotee/.build/release/"
 cp ../tools/stereotool ../tools/localplay "$RT/tools/"
+# 除錯符號表記著每個 .o 的絕對路徑，裡面有建置者的使用者名稱：發佈版拿掉
+[[ ${1:-} == dist ]] && strip -S "$RT/airplay-cli/bin/cliairplay-macos-arm64" "$RT/audiotee/.build/release/audiotee"
 (cd "$RT" && find . -type f ! -name VERSION | sort | xargs shasum -a 256 | shasum -a 256 | cut -c1-16) > "$RT/VERSION"
 HELPERS=("$RT/airplay-cli/bin/cliairplay-macos-arm64" "$RT/audiotee/.build/release/audiotee" "$RT/tools/localplay" "$RT/tools/stereotool")
 for f in $HELPERS; do

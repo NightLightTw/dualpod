@@ -30,6 +30,9 @@ fetch() {  # 資料夾 網址 commit
 fetch airplay-cli https://github.com/music-assistant/airplay-cli.git 0a58c239d5fb3cf8927b9707a71c6fe897266b6a
 fetch audiotee https://github.com/makeusabrew/audiotee.git 56ac954369a09318e46b88a6eec33c2d2b0d32a3
 
-make -C "$ROOT/airplay-cli" -j8 STATIC=1 CC=clang CXX=clang++  # STATIC=1：不依賴 Homebrew 的 OpenSSL
-(cd "$ROOT/audiotee" && swift build -c release)
+# 編譯器會把原始碼的絕對路徑寫進執行檔（__FILE__、除錯資訊），裡面有建置者的使用者名稱：一律改寫成相對路徑。
+# 單引號是給 Makefile 展開後的 shell 看的，路徑有空白也不會被拆開。路徑裡的單引號和 $ 擋不住，直接拒絕
+[[ $ROOT != *[\'\$]* ]] || { echo "repo 的路徑不能有單引號或 \$：$ROOT"; exit 1; }
+make -C "$ROOT/airplay-cli" -j8 STATIC=1 CC=clang CXX=clang++ EXTRA_CFLAGS="'-ffile-prefix-map=$ROOT/='"  # STATIC=1：不依賴 Homebrew 的 OpenSSL
+(cd "$ROOT/audiotee" && swift build -c release -Xswiftc -file-prefix-map -Xswiftc "$ROOT/=")
 echo "ok: now run zsh app/build.sh"
