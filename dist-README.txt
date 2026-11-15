@@ -41,7 +41,7 @@ DualPod 不支援 HomeKit 配對與喇叭密碼。請在「家庭」App 的「�
 - 「結束 DualPod」：串流停止，聲音回到 Mac。
 
 已知限制
-- 聲音大約延遲 0.3 秒。聽音樂沒問題，看影片會對不上嘴型。
+- 聲音大約晚 0.3 秒才從 HomePod 出來。聽音樂感覺不到，看影片時聲音可能比畫面晚一點點。
 - 串流一直失敗（例如 Wi-Fi 斷線）時，5 分鐘內重新連線超過 5 次，DualPod 會放棄。網路恢復後取消、重新勾選一次喇叭。
 - 其他裝置（iPhone、別台 Mac）播到同一台 HomePod 時，兩邊會互相搶。請停掉其中一邊。
 - 開著 VPN 或同時有多個網路時，可能用錯網路，喇叭會沒有聲音。請關掉 VPN，再取消、重新勾選一次喇叭。
@@ -117,7 +117,7 @@ Settings… is in the DualPod menu in the menu bar, not in System Settings. The 
 - Quit DualPod stops streaming and returns sound to the Mac.
 
 Known limitations
-- About 0.3 seconds of delay: fine for music, out of sync for video.
+- The sound reaches the HomePods about 0.3 seconds after the Mac plays it. With music you won't notice. With video, the sound can trail the picture slightly.
 - If the stream keeps failing (for example, Wi-Fi is down), DualPod gives up after more than 5 restarts in 5 minutes. Deselect and reselect a speaker when the network is back.
 - If another device plays to one of the HomePods, the two take turns grabbing it. Stop one of them.
 - With a VPN or several active network interfaces, DualPod may stream from the wrong one and the speakers stay silent. Turn off the VPN, then deselect and reselect a speaker.
