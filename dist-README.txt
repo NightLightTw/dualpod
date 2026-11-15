@@ -29,7 +29,7 @@ DualPod 把 Mac 的聲音送到兩台 HomePod mini，一台當左聲道、一台
 安裝後，「系統設定 → 一般 → 登入項目與延伸功能」會多一個叫「zsh」的背景項目，那就是 DualPod 的背景服務。關掉它 DualPod 就不能播。
 
 「家庭」App 設定
-DualPod 不支援 HomeKit 配對與喇叭密碼。請在「家庭」App 的「家庭設定 → 喇叭與電視」，把「允許喇叭與電視存取」設成「同一網路上的任何人」（或「所有人」），不要設密碼。設成只限家庭成員或設了密碼，HomePod 會沒有聲音，DualPod 也不會提示原因。
+DualPod 不支援 HomeKit 配對與喇叭密碼。請在「家庭」App 的「家庭設定 → 揚聲器與電視」選「連接相同網路的人」（或「所有人」），並關閉「需要輸入密碼」。選了「只限共享此家庭的成員」或設了密碼，HomePod 會沒有聲音，DualPod 也不會提示原因。
 
 使用
 下面的「設定…」在選單列 DualPod 圖示的選單裡，不是 macOS 的「系統設定」。App 介面跟隨系統語言，也可以在「設定… → 一般 → 語言」切換。
@@ -106,7 +106,7 @@ Permissions
 After installing, System Settings → General → Login Items & Extensions lists a background item named "zsh". That is DualPod's helper. Turning it off stops DualPod from playing.
 
 Home app setting
-DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV and set "Allow Speaker & TV Access" to Anyone on the Same Network (or Everyone), with no password. Otherwise the HomePods stay silent, and DualPod doesn't say why.
+DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV, choose Anyone On the Same Network (or Everyone), and turn off Require Password. Otherwise the HomePods stay silent, and DualPod doesn't say why.
 
 Use
 Settings… is in the DualPod menu in the menu bar, not in System Settings. The app follows the system language. Change it in Settings… → General → Language.
