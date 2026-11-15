@@ -478,8 +478,8 @@ struct GeneralPane: View {
                     Button(t("Copy Diagnostics", "複製診斷資訊"), action: copyDiagnostics)
                 }
                 DisclosureGroup(t("What's in the diagnostics", "診斷資訊包含什麼"), isExpanded: $showDetails) {
-                    Text(t("Plain text for reporting a problem: recent sessions and events. IP addresses, device IDs, host names, and the names of speakers found now are replaced by placeholders. Check it once more before sending.",
-                           "回報問題用的純文字：最近幾段播放與事件。IP、裝置 ID、主機名稱、目前找到的喇叭名稱會換成代號，送出前請自己再看一次。"))
+                    Text(t("Plain text for reporting a problem: recent sessions and events. IP addresses, device IDs, .local host names, your home folder, and the names of speakers found now are replaced by placeholders. Check it once more before sending.",
+                           "回報問題用的純文字：最近幾段播放與事件。IP、裝置 ID、.local 結尾的主機名稱、你的家目錄、目前找到的喇叭名稱會換成代號，送出前請自己再看一次。"))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

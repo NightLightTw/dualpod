@@ -3,6 +3,7 @@
 // file; the root service watches it, so no password per switch. Two HomePods = left/right stereo.
 // UI language follows the system by default; the Language submenu can pin English or Traditional Chinese.
 import AppKit
+import AVFoundation
 import SwiftUI
 import CoreAudio
 import AudioToolbox  // VirtualMainVolume 定義在這裡
@@ -416,8 +417,24 @@ final class App: NSObject, NSApplicationDelegate {
     /// The Mac lands D ms behind the HomePods with offset `before + 40`, so `before + 40 − D` lines it up;
     /// D is searched within 40 ± 15 ms, so the current offset only has to be roughly right (and reflections
     /// around 20 ms stay out of the window).
+    var micDeniedMessage: String {
+        t("Couldn't use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
+          "無法使用麥克風，請到「系統設定 → 隱私權與安全性 → 麥克風」允許。")
+    }
+    func micDenied() { settings.syncStatus = micDeniedMessage }
+
     func runAutoAlign() {
         guard settings.canAlign, !settings.aligning else { return }
+        // Ask before the run starts: a prompt that appears mid-recording leaves the recording empty
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: break
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                DispatchQueue.main.async { ok ? self.runAutoAlign() : self.micDenied() }
+            }
+            return
+        default: micDenied(); return
+        }
         let s = settings
         let before = s.appliedSync
         s.sync = before  // an unapplied value in the field would be overwritten by the result anyway
@@ -473,7 +490,9 @@ final class App: NSObject, NSApplicationDelegate {
                             guard self.actual == outputs, self.pending == nil else { finish(before, changed); return }
                             guard let r, r.spread <= 6 else {  // past runs: 1.3–3.7 ms; wider means mismatched peaks
                                 finish(before, samples.isEmpty
-                                       ? t("Couldn't use the microphone. Allow it in System Settings → Privacy → Microphone.", "無法使用麥克風，請到「系統設定 → 隱私權 → 麥克風」允許。")
+                                       ? (AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                                          ? t("Couldn't record from the microphone. Check System Settings → Sound → Input.", "麥克風錄不到聲音，請到「系統設定 → 聲音 → 輸入」檢查。")
+                                          : self.micDeniedMessage)
                                        : t("Couldn't hear both clearly. Try a quieter room. Nothing changed.", "沒有清楚聽到兩邊的聲音，請在安靜一點的地方再試，對齊值沒有改。"))
                                 return
                             }
@@ -605,7 +624,10 @@ final class App: NSObject, NSApplicationDelegate {
                               "串流會停止，聲音回到這台 Mac。之後可以在設定裡重新安裝。")
         a.addButton(withTitle: t("Remove", "移除"))
         a.addButton(withTitle: t("Cancel", "取消"))
-        if a.runModal() == .alertFirstButtonReturn { runHelper(remove: true) }
+        if a.runModal() == .alertFirstButtonReturn {
+            offeredInstall = true  // the status turns "missing" right after; the user just chose that
+            runHelper(remove: true)
+        }
     }
 
     /// First launch on a Mac without the helper: offer to install it right away.
