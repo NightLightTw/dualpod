@@ -1,16 +1,14 @@
 # DualPod
 
+**English** · [繁體中文](README.zh-TW.md)
+
 A macOS menu bar app that plays your Mac's sound on two HomePod minis as left and right, even when they can't be paired as a stereo pair (for example, one of each generation). The Mac's own speakers can play along, aligned in time.
 
 <img src="docs/menu.png" width="279" alt="DualPod menu: two HomePod minis playing left and right, plus This Mac">
 
-中文安裝說明：[dist-README.txt](dist-README.txt)
-
 ## Why this exists
 
 I happily bought a HomePod mini (2nd generation) to go with the first-generation one I already had, got it home, and found out the two can't be set up as a stereo pair. That was annoying enough to start this project.
-
-起因：開開心心買了一台 HomePod mini 第二代回家，才發現它沒辦法跟之前那台第一代配成立體聲，很生氣，所以有了這個專案。
 
 ## Requirements
 
