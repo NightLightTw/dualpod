@@ -39,7 +39,7 @@ After installing, System Settings → General → Login Items & Extensions lists
 
 ### Home app setting
 
-DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV, choose Anyone On the Same Network (or Everyone), and turn off Require Password. If access is limited to people sharing the home, or a password is set, the HomePods stay silent and DualPod doesn't say why.
+DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV, choose Anyone On the Same Network, and turn off Require Password. This lets anyone on your network play to the HomePods, so use DualPod on a home network you trust. If access is limited to people sharing the home, or a password is set, the HomePods stay silent and DualPod doesn't say why.
 
 ## Usage
 

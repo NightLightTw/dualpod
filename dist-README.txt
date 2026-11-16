@@ -27,7 +27,7 @@ Permissions
 After installing, System Settings → General → Login Items & Extensions lists a background item named "zsh". That is DualPod's helper. Turning it off stops DualPod from playing.
 
 Home app setting
-DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV, choose Anyone On the Same Network (or Everyone), and turn off Require Password. Otherwise the HomePods stay silent, and DualPod doesn't say why.
+DualPod doesn't support HomeKit pairing or speaker passwords. In the Home app, open Home Settings → Speakers & TV, choose Anyone On the Same Network, and turn off Require Password. This lets anyone on your network play to the HomePods, so use DualPod on a home network you trust. If access is limited to people sharing the home, or a password is set, the HomePods stay silent and DualPod doesn't say why.
 
 Use
 Settings… is in the DualPod menu in the menu bar, not in System Settings. The app follows the system language. Change it in Settings… → General → Language.
