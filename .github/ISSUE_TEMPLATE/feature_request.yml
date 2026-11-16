@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a change to what DualPod does.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        DualPod sends a Mac's audio to HomePods over AirPlay 2, as left and right on two speakers or as stereo on one. It only supports HomePod: other AirPlay speakers would need their own testing, and only HomePod minis are available to test with here.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: A situation where you'd use this, and what you have to do today instead.
+      placeholder: |
+        When I ...
+        Today I have to ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like DualPod to do
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: policy
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found none asking for this.
+          required: true
+        - label: I understand that requests outside what DualPod does, such as support for speakers other than HomePod, will be closed.
+          required: true
+        - label: I understand that a request doesn't mean it will be built, or by when.
+          required: true

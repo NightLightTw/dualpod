@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in DualPod doesn't work the way it says it does.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      description: If an open or closed issue already describes this, add a comment there instead.
+      options:
+        - label: I searched the open and closed issues and found none about this.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include any error message word for word, but replace your user name, IP addresses, and speaker names in it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Click the DualPod icon in the menu bar.
+        2. Tick ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often it happens
+      options:
+        - Every time
+        - Sometimes
+        - Once so far
+    validations:
+      required: true
+
+  - type: input
+    id: homepods
+    attributes:
+      label: HomePod models and software version
+      description: The software version is in the Home app, in each HomePod's settings. Write "unknown" if you can't check.
+      placeholder: "HomePod mini (1st gen) + HomePod mini (2nd gen), software 27.2"
+    validations:
+      required: true
+
+  - type: input
+    id: mac
+    attributes:
+      label: Mac model
+      description: Apple menu → About This Mac.
+      placeholder: "MacBook Air (M2, 2022)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In DualPod, choose Settings…, open General, and click Copy Diagnostics under Troubleshooting, then paste it here. Its first lines give the DualPod and macOS versions.
+        Check the text before submitting. DualPod replaces IP addresses, device IDs, `.local` host names, your home folder, and the names of the speakers it currently sees, but it can miss some, such as one-character speaker names, speakers it no longer sees, or a home folder name with a space in it. Replace anything it missed by hand.
+        If DualPod won't open, write the DualPod and macOS versions instead.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: For example, whether it worked in an earlier version, or something that makes it go away.

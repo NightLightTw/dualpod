@@ -4,17 +4,18 @@ DualPod is maintained by one person with two HomePod minis (1st and 2nd generati
 
 ## Reporting a bug
 
-Search the existing issues, open and closed, first. A new issue should include:
+Search the existing issues, open and closed, first. Then open a new issue with the Bug report form, which asks for:
 
 - The diagnostics. Click the DualPod icon in the menu bar, choose Settings…, open General, and click Copy Diagnostics under Troubleshooting. The text goes to the clipboard. Its first lines give the DualPod and macOS versions.
 
   Check the text before pasting it into the issue. DualPod tries to replace IP addresses, device IDs, `.local` host names, your home folder, and the names of the speakers it currently sees with placeholders, but it can miss some. Examples are speaker names of one character, speakers it no longer sees, and a home folder name with a space in it. Replace anything it missed by hand.
 - The HomePod model and software version (Home app → the HomePod's settings).
+- Your Mac model (Apple menu → About This Mac).
 - What you did, what you expected, and what happened.
 
 ## Suggesting a feature
 
-Open an issue describing the problem before writing code, so you and the maintainer can agree on the scope.
+Open an issue with the Feature request form before writing code, so you and the maintainer can agree on the scope. DualPod only supports HomePod, so requests for other speakers will be closed.
 
 ## Sending a pull request
 
