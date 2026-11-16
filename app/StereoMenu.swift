@@ -163,6 +163,7 @@ final class App: NSObject, NSApplicationDelegate {
     var rows: [String: DeviceRow] = [:]
     var homeVolume: [String: Int] = [:]  // speaker id → 0…100; 35 until set
     let settingsItem = NSMenuItem(title: "", action: #selector(openSettings), keyEquivalent: ",")
+    let updateItem = NSMenuItem(title: "", action: #selector(openUpdatePage), keyEquivalent: "")
     let settings = SettingsModel()
     let channelTest = ChannelTest()
     var settingsWindow: NSWindow?
@@ -172,11 +173,14 @@ final class App: NSObject, NSApplicationDelegate {
     var pending: (want: Set<String>, deadline: Date)?  // picked, waiting for the service to get there
     var lastStatus: [String] = []
     var offeredInstall = false
+    var updateInFlight = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         warning.target = self
         warning.action = #selector(installHelper)
         menu.addItem(warning)
+        updateItem.target = self
+        menu.addItem(updateItem)
         menu.addItem(header)
         syncRows()
         menu.delegate = self
@@ -190,12 +194,21 @@ final class App: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.render(self.lastStatus)
         }
+        settings.onUpdateChange = { [weak self] in
+            guard let self else { return }
+            self.render(self.lastStatus)
+        }
         item.menu = menu
         render([])
         refresh()
         // .common: keep refreshing while the menu is open, so "Switching…" turns into the result in place
         RunLoop.main.add(Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }, forMode: .common)
         restoreAfterAlign()  // a crash or force quit during auto-align
+        // Once shortly after launch (the network may not be up yet at login), then daily: the app runs for weeks
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { self.checkForUpdate(manual: false) }
+        RunLoop.main.add(Timer(timeInterval: 24 * 3600, repeats: true) { [weak self] _ in
+            self?.checkForUpdate(manual: false)
+        }, forMode: .common)
         if CommandLine.arguments.contains("--settings") { openSettings() }  // open -a … --args --settings
         if CommandLine.arguments.contains("--autoalign") {  // same as the Settings button, for testing
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.runAutoAlign() }
@@ -312,6 +325,13 @@ final class App: NSObject, NSApplicationDelegate {
         let last = lines.dropFirst().first ?? ""
         lastLine.title = t("Last event: ", "上次事件：") + last.dropFirst(11)
         lastLine.isHidden = !(last.contains("restart:") || last.contains("gave up"))
+        if let tag = settings.foundTag {
+            let v = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            updateItem.title = t("DualPod \(v) Is Available…", "有新版本：DualPod \(v)…")
+            updateItem.isHidden = false
+        } else {
+            updateItem.isHidden = true
+        }
         settingsItem.title = t("Settings…", "設定…")
         let playing = actual.filter { $0 != "Mac" }.sorted()
         if settings.playing != playing { settings.playing = playing }
@@ -334,6 +354,8 @@ final class App: NSObject, NSApplicationDelegate {
                 model: settings,
                 openLogs: { [weak self] in self?.openLogs() },
                 copyDiagnostics: { [weak self] in self?.copyDiagnostics() },
+                checkUpdate: { [weak self] in self?.checkForUpdate(manual: true) },
+                openUpdate: { [weak self] in self?.openUpdatePage() },
                 installHelper: { [weak self] in self?.runHelper(remove: false) },
                 uninstallHelper: { [weak self] in self?.uninstallHelper() }))
             let glow = NSHostingController(rootView: GlowPane(model: settings))
@@ -531,7 +553,7 @@ final class App: NSObject, NSApplicationDelegate {
         func tail(_ path: String, _ n: Int) -> String {
             ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").suffix(n).joined(separator: "\n")
         }
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let version = appVersion
         var text = [
             "DualPod \(version)",
             "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)",
@@ -645,6 +667,29 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     func openLogs() { NSWorkspace.shared.open(URL(fileURLWithPath: logDir)) }
+
+    func checkForUpdate(manual: Bool) {
+        guard manual || settings.autoUpdateCheck else { return }
+        if manual { settings.update = .checking }
+        guard !updateInFlight else { return }  // a manual check during an automatic one takes its result
+        updateInFlight = true
+        checkLatestRelease { [weak self] result in
+            guard let self else { return }
+            self.updateInFlight = false
+            let waiting = self.settings.update == .checking
+            switch result {
+            case .available(let tag): self.settings.foundTag = tag; self.settings.update = result
+            case .upToDate: self.settings.foundTag = nil; self.settings.update = result
+            default:  // a failed check never hides a version already found; automatic ones fail silently
+                if let tag = self.settings.foundTag { self.settings.update = .available(tag: tag) }
+                else if waiting { self.settings.update = .failed }
+            }
+        }
+    }
+
+    @objc func openUpdatePage() {
+        if let tag = settings.foundTag { NSWorkspace.shared.open(releasePage(tag)) }
+    }
 }
 
 extension App: NSMenuDelegate {

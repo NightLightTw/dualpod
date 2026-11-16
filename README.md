@@ -87,7 +87,8 @@ Open an [issue](https://github.com/NightLightTw/dualpod/issues) with your Mac mo
 
 ## Privacy
 
-- DualPod doesn't connect to the internet and collects nothing. It finds speakers with Bonjour on the local network and sends sound only to the speakers you select.
+- DualPod collects nothing. It finds speakers with Bonjour on the local network and sends sound only to the speakers you select.
+- Its only internet connection is to GitHub, when it opens and once a day after that, to check for a newer version. The menu then shows the new version and links to its download page. Nothing is downloaded or installed automatically. Turn it off in Settings… → General → Check for updates automatically.
 - Logs stay on the Mac, under `/Library/Application Support/AirPlayStereo/logs`. Session logs are deleted after 7 days.
 
 ## How it works

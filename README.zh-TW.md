@@ -87,7 +87,8 @@ rm -rf ~/Library/Application\ Support/AirPlayStereo
 
 ## 隱私
 
-- DualPod 不連網際網路、不收集任何資料。找喇叭用的是同一個網路上的 Bonjour，聲音只送到你勾選的喇叭。
+- DualPod 不收集任何資料。找喇叭用的是同一個網路上的 Bonjour，聲音只送到你勾選的喇叭。
+- 唯一的網際網路連線是向 GitHub 查有沒有新版，App 開啟時查一次，之後每天一次。有的話選單會顯示新版本並連到下載頁，不會自動下載或安裝。可以在「設定… → 一般 → 自動檢查更新」關掉。
 - 記錄只存在這台 Mac 的 `/Library/Application Support/AirPlayStereo/logs`，每段播放的記錄 7 天後刪除。
 
 ## 運作方式

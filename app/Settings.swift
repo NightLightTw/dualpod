@@ -79,6 +79,12 @@ final class SettingsModel: ObservableObject {
     @Published var helper = "ok"  // "missing", "outdated", "stopped", "ok"
     @Published var helperBusy = false
     @Published var lang = langSetting { didSet { langSetting = lang; onLangChange() } }
+    @Published var autoUpdateCheck = UserDefaults.standard.object(forKey: "checkUpdates") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoUpdateCheck, forKey: "checkUpdates") }
+    }
+    @Published var update = UpdateState.idle { didSet { onUpdateChange() } }
+    @Published var foundTag: String? { didSet { onUpdateChange() } }  // newest release seen; stays while checking again
+    var onUpdateChange: () -> Void = {}
     /// "off", "preset:<name>" or "custom:#RRGGBB"; the service reads it when playback starts and when it changes
     @Published private(set) var glow = parseGlow(readGlowFile())
     /// Saves first and updates the UI only if that worked, so a failed write leaves the old state and picking again retries
@@ -432,9 +438,22 @@ struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     let openLogs: () -> Void
     let copyDiagnostics: () -> Void
+    let checkUpdate: () -> Void
+    let openUpdate: () -> Void
     let installHelper: () -> Void
     let uninstallHelper: () -> Void
     @State private var showDetails = false
+
+    private var updateStatus: String {
+        switch model.update {
+        case .idle: return ""
+        case .checking: return t("Checking…", "檢查中…")
+        case .upToDate: return t("You have the latest version.", "已經是最新版。")
+        case .failed: return t("Couldn't check. Try again later.", "無法檢查，請稍後再試。")
+        case .available(let tag): return t("Version \(tag.hasPrefix("v") ? String(tag.dropFirst()) : tag) is available.",
+                                           "有新版本 \(tag.hasPrefix("v") ? String(tag.dropFirst()) : tag)。")
+        }
+    }
 
     var body: some View {
         let _ = model.lang
@@ -470,6 +489,26 @@ struct GeneralPane: View {
             } footer: {
                 Text(t("It streams the Mac's sound to the speakers. Installing, updating, and removing it need your administrator password.",
                        "負責把 Mac 的聲音送到喇叭。安裝、更新、移除都要輸入管理員密碼。"))
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle(t("Check for updates automatically", "自動檢查更新"), isOn: $model.autoUpdateCheck)
+                LabeledContent {
+                    HStack {
+                        if model.foundTag != nil {
+                            Button(t("Open Download Page", "打開下載頁"), action: openUpdate)
+                        }
+                        Button(t("Check Now", "立即檢查"), action: checkUpdate).disabled(model.update == .checking)
+                    }
+                } label: {
+                    Text(t("Version ", "版本 ") + appVersion)
+                    if !updateStatus.isEmpty { Text(updateStatus) }
+                }
+            } header: {
+                Text(t("Updates", "更新"))
+            } footer: {
+                Text(t("DualPod only asks GitHub for the latest version number. It doesn't download or install anything.",
+                       "只會向 GitHub 查最新的版本號，不會自動下載或安裝。"))
                     .foregroundStyle(.secondary)
             }
             Section {

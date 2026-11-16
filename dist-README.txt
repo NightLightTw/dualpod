@@ -58,7 +58,7 @@ If the app is already gone, run these in Terminal (AirPlay Stereo is DualPod's e
 
 Report a problem: https://github.com/NightLightTw/dualpod/issues, with your Mac model, macOS version, HomePod models and software version, the DualPod version (the number in the download's file name), and the Copy Diagnostics output. It replaces IP addresses, device IDs, and speaker names with placeholders, but read it before posting.
 
-Privacy: DualPod doesn't connect to the internet and collects nothing. Logs stay on this Mac.
+Privacy: DualPod collects nothing, and logs stay on this Mac. Its only internet connection is to GitHub, when it opens and once a day after that, to check for a newer version. Nothing is downloaded or installed automatically. To turn it off: Settings… → General → Check for updates automatically.
 
 License: GNU GPL version 3, see LICENSE and THIRD_PARTY_NOTICES.md in this folder.
 Source: https://github.com/NightLightTw/dualpod (the release with the same version number as this download).
