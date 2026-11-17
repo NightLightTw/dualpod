@@ -49,6 +49,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleExecutable</key><string>StereoMenu</string>
   <key>CFBundleIdentifier</key><string>local.airplay-stereo.menu</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -57,12 +58,18 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>LSUIElement</key><true/>
-  <key>NSAudioCaptureUsageDescription</key><string>DualPod records the Mac's sound to send it to your speakers. DualPod 會錄下 Mac 的聲音，送到喇叭。</string>
-  <key>NSMicrophoneUsageDescription</key><string>Auto-align listens to the speakers to line the Mac up with the HomePods. 自動對齊會用麥克風聽喇叭，把 Mac 和 HomePod 對齊。</string>
+  <key>NSAudioCaptureUsageDescription</key><string>DualPod records the Mac's sound to send it to your speakers.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Auto-align listens to the speakers to line the Mac up with the HomePods.</string>
   <key>LSMinimumSystemVersion</key><string>14.4</string>
 </dict></plist>
 EOF
 mkdir -p "$APP/Contents/Resources"; cp AppIcon.icns "$APP/Contents/Resources/"  # 由 ../tools/make-icon.swift 從 icon.svg 產生
+# 權限提示由 macOS 顯示，跟系統語言走：英文寫在 Info.plist，中文放 zh-Hant.lproj
+mkdir -p "$APP/Contents/Resources/zh-Hant.lproj"
+cat > "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings" <<'EOF'
+"NSAudioCaptureUsageDescription" = "DualPod 會錄下 Mac 的聲音，送到喇叭。";
+"NSMicrophoneUsageDescription" = "自動對齊會用麥克風聽喇叭，把 Mac 和 HomePod 對齊。";
+EOF
 swiftc -O -target $TARGET ../tools/localplay.swift -o ../tools/localplay  # 本機喇叭同步播放器
 swiftc -O -target $TARGET ../tools/stereotool.swift -o ../tools/stereotool  # 時鐘與拆聲道（取代 Python）
 # 背景服務要裝的檔案打包進 App，App 用管理員密碼視窗安裝或更新；VERSION 是這些檔案的雜湊
