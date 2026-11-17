@@ -209,3 +209,38 @@ pr.kill()
 assert open(routes + ".active").read() == second, "沒有 @ 的新檔套用後 .active 就是它，不是被取代的舊檔"
 assert not frames("b2"), "被取代的排程不能執行"
 print("split replaced-schedule self-test ok")
+
+
+# (5) 延遲固定：輸入晚到（啟動慢 60 ms）或斷流後恢復，那批輸入都要排在「收到時刻 + (T − t0)」播出，
+# 也就是 run_pair 設的 TARGET，不能被晚到的時間吃掉
+names = ["a"]
+fp = {"a": f"{d}/ld-a"}
+if os.path.exists(fp["a"]): os.remove(fp["a"])
+os.mkfifo(fp["a"])
+holders = [os.open(fp["a"], os.O_RDWR)]
+T = int(time.time() * 1000) + 200
+pr = subprocess.Popen([split, "split", "--start-ms", str(T), f"{fp['a']}:LR"], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+t0 = float(pr.stderr.readline().decode().split("t0_unix=")[1]) * 1000
+chunks = {"a": []}
+stop = {"a": False}
+threads = [threading.Thread(target=rd, args=("a",), daemon=True)]
+for t in threads: t.start()
+time.sleep(0.06)
+k0 = 0
+t_first = time.time() * 1000
+feed(1.0)
+time.sleep(0.15)
+k_resume, t_resume = k0, time.time() * 1000
+feed(0.5)
+time.sleep(0.2)
+stop["a"] = True
+for t in threads: t.join()
+pr.kill()
+fa = frames("a")
+z1 = next(i for i, (l, _) in enumerate(fa) if l != 0)
+z2 = next(i for i, (l, _) in enumerate(fa) if l == k_resume % W + 1 and i >= z1 + k_resume)  # 編號每 W 個繞回，從第一段之後找
+want = T - t0
+lead1, lead2 = T + z1 / 44.1 - t_first, T + z2 / 44.1 - t_resume
+assert abs(lead1 - want) < 20, f"晚 60 ms 才來的第一批輸入，延遲要是 {want:.0f} ms，實際 {lead1:.0f}"
+assert abs(lead2 - want) < 20, f"斷流 150 ms 後恢復，延遲要是 {want:.0f} ms，實際 {lead2:.0f}"
+print(f"split fixed-latency self-test ok (want {want:.0f} ms, start {lead1:.0f}, after stall {lead2:.0f})")

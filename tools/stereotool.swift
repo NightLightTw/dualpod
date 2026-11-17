@@ -233,6 +233,8 @@ func split(_ argv: [String]) {
     let unixOffsetNs = clockOffset ?? Int64(tv.tv_sec) * 1_000_000_000 + Int64(tv.tv_nsec) - t0
     var pending = [UInt8]()
     var silenceFrames = 0, droppedFrames = 0, lastLog = -1
+    var starved = true  // 還沒收到輸入，或斷流補過靜音：下一批輸入先補靜音到基準線再寫
+    // shortcut: 落後不到 idle 的短斷流若真的掉了資料（之後沒補送），延遲會少掉那一段；長時間播放的 lead_ms 看得出漂移再處理
     // lead：收到的輸入離它排定播出還有多久（T + 寫到的 frame / 44.1 kHz − 收到的時刻），每 10 秒記一次，拆解延遲用
     var leadMin = Double.infinity, leadMax = -Double.infinity, leadSum = 0.0, leadN = 0
     var buf = [UInt8](repeating: 0, count: 65536)
@@ -248,6 +250,12 @@ func split(_ argv: [String]) {
         let due = Int(elapsed * fs)  // 照牆鐘此刻應該輸出到第幾個 frame
         let frames = pending.count / 4
         if frames > 0 {
+            if starved, written < due {  // 晚到的那段補成靜音，這批才會在「收到時刻 + (T − t0)」播出，延遲固定
+                let zeros = [Int16](repeating: 0, count: (due - written) * 2)
+                silenceFrames += due - written
+                zeros.withUnsafeBufferPointer { emitAdvancing($0) }
+            }
+            starved = false
             let take = min(frames, max(0, due + maxAhead - written))
             droppedFrames += frames - take
             if take > 0 {  // 丟最舊的、留最新的，延遲才不會被拉長
@@ -266,6 +274,7 @@ func split(_ argv: [String]) {
             let zeros = [Int16](repeating: 0, count: gap * 2)
             zeros.withUnsafeBufferPointer { emitAdvancing($0) }
             silenceFrames += gap
+            starved = true
         }
         let sec = Int(elapsed)
         if sec % 10 == 0, sec != lastLog {
