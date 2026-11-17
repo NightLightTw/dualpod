@@ -4,7 +4,7 @@
 //                                           NTP 調整系統時間時兩台不會一台跳、一台慢慢追
 //   stereotool now <offset>                 依上面的時鐘印出現在的 Unix ms
 //   stereotool sleepuntil <unix_ms> <offset>  睡到那個時刻
-//   stereotool split [--routes <檔>] [--start-ms <T>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
+//   stereotool split [--routes <檔>] [--start-ms <T>] [--clock-offset <ns>] <路徑:聲道>…   stdin 的 s16le 44.1 kHz 立體聲拆給各輸出：L、R（複製成雙聲道）、LR（原樣）、
 //                                           0（寫靜音，時間軸照走）、X（關掉 fd，之後不再寫）
 //   stereotool glowart <out.jpg> <RRGGBB>…   寫 512x512 sRGB JPEG，1 到 3 個顏色等寬直條。HomePod 的 Sound Glow 從 Now Playing 封面取主色，
 //                                           這張圖就是拿來指定光暈顏色的
@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 
 func rawNs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) }
 func err(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
-func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | glowart <out.jpg> <RRGGBB>… | split [--routes <檔>] [--start-ms <T>] <路徑:L|R|LR|0|X>…"); exit(2) }
+func usage() -> Never { err("用法: stereotool offset | now <offset> | sleepuntil <unix_ms> <offset> | glowart <out.jpg> <RRGGBB>… | split [--routes <檔>] [--start-ms <T>] [--clock-offset <ns>] <路徑:L|R|LR|0|X>…"); exit(2) }
 
 let args = CommandLine.arguments
 guard args.count >= 2 else { usage() }
@@ -76,10 +76,14 @@ func glowart(out: String, hex: [String]) {
 func split(_ argv: [String]) {
     var specs = argv
     var routesFile: String?
-    var startMs: Int64?
-    while let opt = specs.first, opt == "--routes" || opt == "--start-ms" {
+    var startMs: Int64?, clockOffset: Int64?
+    while let opt = specs.first, ["--routes", "--start-ms", "--clock-offset"].contains(opt) {
         guard specs.count >= 2 else { usage() }
-        if opt == "--routes" { routesFile = specs[1] } else if let t = Int64(specs[1]) { startMs = t } else { usage() }
+        switch opt {
+        case "--routes": routesFile = specs[1]
+        case "--start-ms": guard let t = Int64(specs[1]) else { usage() }; startMs = t
+        default: guard let o = Int64(specs[1]) else { usage() }; clockOffset = o
+        }
         specs.removeFirst(2)
     }
     let fs = 44100.0
@@ -225,8 +229,12 @@ func split(_ argv: [String]) {
     var tv = timespec()
     clock_gettime(CLOCK_REALTIME, &tv)
     err(String(format: "split: t0_unix=%.6f", Double(tv.tv_sec) + Double(tv.tv_nsec) / 1e9))  // 樣本 0 寫出的時間
+    // 和排定 T 的那一段用同一個位移，校時不會混進 lead
+    let unixOffsetNs = clockOffset ?? Int64(tv.tv_sec) * 1_000_000_000 + Int64(tv.tv_nsec) - t0
     var pending = [UInt8]()
     var silenceFrames = 0, droppedFrames = 0, lastLog = -1
+    // lead：收到的輸入離它排定播出還有多久（T + 寫到的 frame / 44.1 kHz − 收到的時刻），每 10 秒記一次，拆解延遲用
+    var leadMin = Double.infinity, leadMax = -Double.infinity, leadSum = 0.0, leadN = 0
     var buf = [UInt8](repeating: 0, count: 65536)
     var pfd = pollfd(fd: 0, events: Int16(POLLIN), revents: 0)
     while true {
@@ -247,6 +255,10 @@ func split(_ argv: [String]) {
                     let s = raw.bindMemory(to: Int16.self)
                     emitAdvancing(UnsafeBufferPointer(rebasing: s[(frames - take) * 2 ..< frames * 2]))
                 }
+                if let t = startMs {
+                    let lead = Double(t) + Double(written) / fs * 1000 - Double(nowNs + unixOffsetNs) / 1e6
+                    leadMin = min(leadMin, lead); leadMax = max(leadMax, lead); leadSum += lead; leadN += 1
+                }
             }
             pending.removeFirst(frames * 4)
         } else if written < due - idle {  // 斷流：補靜音到基準線
@@ -256,12 +268,18 @@ func split(_ argv: [String]) {
             silenceFrames += gap
         }
         let sec = Int(elapsed)
-        if sec % 10 == 0, sec != lastLog, silenceFrames > 0 || droppedFrames > 0 {
+        if sec % 10 == 0, sec != lastLog {
             lastLog = sec
-            err(String(format: "split: 補靜音 %.0f ms，丟棄 %.0f ms",
-                       Double(silenceFrames) / fs * 1000, Double(droppedFrames) / fs * 1000))
-            silenceFrames = 0
-            droppedFrames = 0
+            if silenceFrames > 0 || droppedFrames > 0 {
+                err(String(format: "split: 補靜音 %.0f ms，丟棄 %.0f ms",
+                           Double(silenceFrames) / fs * 1000, Double(droppedFrames) / fs * 1000))
+            }
+            if leadN > 0 {
+                err(String(format: "split: lead_ms min=%.1f avg=%.1f max=%.1f reads=%d",
+                           leadMin, leadSum / Double(leadN), leadMax, leadN))
+            }
+            silenceFrames = 0; droppedFrames = 0
+            leadMin = .infinity; leadMax = -.infinity; leadSum = 0; leadN = 0
         }
     }
 }

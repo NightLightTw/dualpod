@@ -16,7 +16,9 @@ DualPod is licensed under the GNU General Public License, version 3 (see [LICENS
 
 - Source: https://github.com/makeusabrew/audiotee, commit `56ac954369a09318e46b88a6eec33c2d2b0d32a3`
 - License: MIT
-- Patch: `patches/audiotee/0001-converter-supply-input-once.diff` hands each input chunk to the sample-rate converter once. The unpatched converter replayed the chunk when asked for more input, which added an audible hiss to music.
+- Patches:
+  - `patches/audiotee/0001-converter-supply-input-once.diff` hands each input chunk to the sample-rate converter once. The unpatched converter replayed the chunk when asked for more input, which added an audible hiss to music.
+  - `patches/audiotee/0002-log-chunk-age.diff` logs, every 10 seconds, how old the last captured sample is when each capture callback writes its last chunk out (not counting the resampler). DualPod uses it to measure latency.
 
 ```
 The MIT License
