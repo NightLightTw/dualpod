@@ -56,7 +56,7 @@ Settings… is in the DualPod menu in the menu bar, not in System Settings. The 
 
 ## Known limitations
 
-- The sound reaches the HomePods a little after the Mac plays it. The delay is the buffer you pick in Settings (200 ms by default). With music you won't notice. With video, the sound can trail the picture slightly.
+- The sound reaches the HomePods a little after the Mac plays it. The delay is roughly the buffer you pick in Settings (200 ms by default). With music you won't notice. With video, the sound can trail the picture slightly.
 - If the stream keeps failing, for example because Wi-Fi is down, DualPod gives up after more than 5 restarts in 5 minutes. Deselect and reselect a speaker when the network is back.
 - If another device (an iPhone, another Mac) starts playing to one of the HomePods, DualPod and that device take turns grabbing it. Stop one of them.
 - With a VPN or several network interfaces active, DualPod may stream from the wrong one and the speakers stay silent. Turn off the VPN, then deselect and reselect a speaker.

@@ -93,7 +93,7 @@ final class SettingsModel: ObservableObject {
     @Published var appliedBuffer = parseBuffer(readSetting(bufferFile))  // what's saved for the service
     @Published var bufferChoice = bufferChoiceFor(parseBuffer(readSetting(bufferFile)))  // 0 = Custom
     @Published var customBuffer = parseBuffer(readSetting(bufferFile)) {  // what the Custom field shows
-        didSet { if customBuffer != max(bufferRange.lowerBound, min(bufferRange.upperBound, customBuffer)) { customBuffer = max(bufferRange.lowerBound, min(bufferRange.upperBound, customBuffer)) } }
+        didSet { let c = min(max(customBuffer, bufferRange.lowerBound), bufferRange.upperBound); if c != customBuffer { customBuffer = c } }
     }
     @Published var canAlign = false  // the Mac and at least one HomePod are playing
     @Published var aligning = false
@@ -299,6 +299,7 @@ struct AudioPane: View {
                     ForEach(bufferPresets, id: \.ms) { Text($0.label).tag($0.ms) }
                     Text(t("Custom", "自訂")).tag(0)
                 }
+                .disabled(model.aligning)  // 選預設檔會立刻寫檔、重啟串流，量測中不能動
                 if model.bufferChoice == 0 {
                     LabeledContent(t("Buffer", "緩衝")) {
                         HStack(spacing: 4) {
