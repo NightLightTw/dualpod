@@ -297,11 +297,10 @@ struct AudioPane: View {
                     .foregroundStyle(.secondary)
             }
             Section {
-                Picker(t("Buffer", "緩衝"), selection: Binding(get: { model.bufferChoice }, set: model.chooseBuffer)) {
+                Picker(t("Preset", "檔位"), selection: Binding(get: { model.bufferChoice }, set: model.chooseBuffer)) {
                     ForEach(bufferPresets, id: \.ms) { Text($0.label).tag($0.ms) }
                     Text(t("Custom", "自訂")).tag(0)
                 }
-                .labelsHidden()  // 區塊標題已經是「緩衝」
                 .disabled(model.aligning)  // 選預設檔會立刻寫檔、重啟串流，量測中不能動
                 if model.bufferChoice == 0 {
                     LabeledContent(t("Custom value", "自訂值")) {
