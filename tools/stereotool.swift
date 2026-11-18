@@ -56,7 +56,7 @@ default:
 }
 
 func glowart(out: String, hex: [String]) {
-    guard !out.isEmpty, (1...3).contains(hex.count),
+    guard !out.isEmpty, (1...4).contains(hex.count),
           hex.allSatisfy({ $0.count == 6 && $0.allSatisfy(\.isHexDigit) && $0.allSatisfy(\.isASCII) }) else { usage() }
     let n = 512
     let cs = CGColorSpace(name: CGColorSpace.sRGB)!

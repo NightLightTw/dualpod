@@ -250,7 +250,8 @@ known() { [[ $1 == [0-9A-F](#c12) ]] && grep -q "^$1"$'\t' $SPEAKERS 2>/dev/null
 # Sound Glow（HomePod 27.2 頂端燈光）：燈色取自 Now Playing 封面的主色。實測只傳音訊不會亮；SENDMETA 會亮但是白色，
 # 之後單獨送 ARTWORK= 才會換成那張圖的主色。cliairplay 會忽略和上一張位元組相同的封面，所以封面一律只用 ARTWORK=、不附在 SENDMETA。
 # 顏色名稱表只在這裡（App 的色票另存一份顯示用，名稱要一致）
-typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400" cool "1E40FF 8A2BE2 00B4FF" aurora "00C853 00E5C0 7CFC00" candy "FF4FA3 B14CFF 4CC9FF")
+# 每組最後加一條黑：11-18 盲測同一個粉紅加黑 4、4 分，只有粉紅 2、2 分（1–5 分），封面有暗的部分燈的明暗起伏才明顯（#1）
+typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400 000000" cool "1E40FF 8A2BE2 00B4FF 000000" aurora "00C853 00E5C0 7CFC00 000000" candy "FF4FA3 B14CFF 4CC9FF 000000")
 GLOW_DELAY=${GLOW_DELAY:-2}  # SENDMETA 會把顏色重設成白色；是否要隔一段才送封面沒實測過，先等這幾秒
 typeset -A glow_sent  # 每個 cmd 管道收過什麼：「meta@<該送封面的 SECONDS>」或「art:<封面檔名>」；沒有這個鍵就是什麼都沒收過
 glow_rd=""
