@@ -1,5 +1,5 @@
 #!/bin/zsh
-# 一般使用者身分執行，背景服務要在播、房間要安靜：zsh tools/sweep.sh <每檔分鐘> <緩衝 ms>…（由大到小）
+# 一般使用者身分執行，背景服務要在播、房間要安靜（或設 SKIP_E2E=1 不量端到端）：zsh tools/sweep.sh <每檔分鐘> <緩衝 ms>…（由大到小）
 # 每檔寫 buffer-ms 讓背景服務重新起播，播完後記下斷流與重啟次數、split lead，再跑一次 hourcheck 量端到端與左右偏差。
 # 一檔斷流 2 次以上或自癒放棄就停：再小只會更糟。結束時把 buffer-ms 還原。
 set -u
@@ -33,9 +33,17 @@ for b in "$@"; do
   { echo "=== $b ms（$(date +%H:%M)）起播 $stamp"
     echo "斷流／REANCHOR $bad 次，看門狗重啟 $(print -r -- $new | grep -c 'restart:') 次${gave:+，自癒放棄}"
     grep 'lead_ms' $LOGS/pair-$stamps[-1]-split.log | tail -1
+    # 喇叭漏收封包時會要求重傳（cliairplay patch 0003 每 5 秒印一次）。age 是封包送出到被要求的時間，接近緩衝減 HomePod 處理時間就來不及補
+    # 沒有 retransmit 行的那台記為 0：可能真的沒漏包，也可能還沒滿 5 秒就結束
+    spk=(); for s in $stamps; do spk+=($LOGS/pair-$s-[0-9A-F]*.log(N)); done
+    for f in $spk; do
+      print -r -- "${${f##*-}%.log} $(grep -h 'retransmit:' $f | tail -1 | sed -n 's/.*retransmit: \([0-9]*\) requested, \([0-9]*\) resent, \([0-9]*\) already retired.*/\1 \2 \3/p')"
+    done | awk '{r[$1]+=$2; a[$1]+=$3; x[$1]+=$4} END {for (k in r) printf "重傳 %s：要求 %d、補送 %d、已淘汰 %d\n", k, r[k], a[k], x[k]}'
+    (( $#spk )) && grep -h 'retransmit:' $spk | sed -n 's/.*last 5 s: \([0-9]*\) found, age avg \([0-9]*\) max \([0-9]*\) ms.*/\1 \2 \3/p' |
+      awk '{n+=$1; s+=$1*$2; if ($3>m) m=$3} END {if (n) printf "被要求的封包從送出到被要求：平均 %.0f ms，最大 %d ms\n", s/n, m}'
   } | tee -a $OUT
   [[ -n $gave ]] && break
-  zsh $DIR/tools/hourcheck.sh 1 1 2>&1 | grep -E '右減左|端到端|峰值' | tee -a $OUT
+  [[ -n ${SKIP_E2E:-} ]] || zsh $DIR/tools/hourcheck.sh 1 1 2>&1 | grep -E '右減左|端到端|峰值' | tee -a $OUT  # 放著音樂掃時設 SKIP_E2E=1，chirp 會被音樂蓋掉
   (( bad >= 2 )) && { echo "斷流 2 次以上，不再往下" | tee -a $OUT; break; }
 done
 restore
