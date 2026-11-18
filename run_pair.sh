@@ -184,11 +184,13 @@ if [[ $MODE == live* ]]; then  # 系統聲音：audiotee（process tap，--mute 
     [[ ${LEFT:-} == $HP[2] ]] && OUTS=($RUN/pcm-$HP[2]:L $RUN/pcm-$HP[1]:R)
   fi
   (( $#EXCL )) && OUTS+=($RUN/pcm-Mac:$([[ -n $WITH_MAC ]] && echo LR || echo 0))  # 路由表之後由 stereo.sh reroute 寫到 $RUN/routes
-  $TOOL sleepuntil $(( T - TARGET_MS )) $CLOCK_OFFSET
   # launchctl asuser：從背景服務啟動時也要進使用者的登入 session，系統錄音權限才找得到
+  # tap 先開：它要 110–160 ms 才吐出第一塊，等到 T − TARGET 才開的話，緩衝 120 時第一塊聲音會晚過 T（起播必斷）。
+  # 先吐出來的那些積在 pipe 裡（約 200 ms，小於 pipe 容量），split 一開始會丟掉舊的、只留最新一塊
   launchctl asuser $(id -u $AS_USER) sudo -u $AS_USER $DIR/audiotee/.build/release/audiotee --stereo --sample-rate 44100 \
       --chunk-duration 0.02 --mute $EXCL 2> $LOGS/pair-$STAMP-tap.log |
-    $TOOL split --routes $RUN/routes --start-ms $T --clock-offset $CLOCK_OFFSET $OUTS 2> $LOGS/pair-$STAMP-split.log &
+    { $TOOL sleepuntil $(( T - TARGET_MS )) $CLOCK_OFFSET
+      exec $TOOL split --routes $RUN/routes --start-ms $T --clock-offset $CLOCK_OFFSET $OUTS 2> $LOGS/pair-$STAMP-split.log } &
   PIDS+=($!)
   if [[ $MODE == livemeasure ]]; then  # 用 afplay 播 chirp，量端到端延遲（播放呼叫 → 麥克風）與左右偏差
     REC=$LOGS/pair-$STAMP-mic.wav
