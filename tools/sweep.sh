@@ -48,7 +48,7 @@ for b in "$@"; do
       awk '{n+=$1; s+=$1*$2; if ($3>m) m=$3} END {if (n) printf "被要求的封包從送出到被要求：平均 %.0f ms，最大 %d ms\n", s/n, m}'
   } | tee -a $OUT
   [[ -n $gave ]] && break
-  [[ -n ${SKIP_E2E:-} ]] || zsh $DIR/tools/hourcheck.sh 1 1 2>&1 | grep -E '右減左|端到端|峰值' | tee -a $OUT  # 放著音樂掃時設 SKIP_E2E=1，chirp 會被音樂蓋掉
+  [[ -n ${SKIP_E2E:-} ]] || zsh $DIR/tools/hourcheck.sh 1 1 2>&1 | grep -E '右減左|端到端|峰值|Error|Traceback' | tee -a $OUT  # 放著音樂掃時設 SKIP_E2E=1，chirp 會被音樂蓋掉
   (( bad >= 2 )) && { echo "斷流 2 次以上，不再往下" | tee -a $OUT; break; }
 done
 restore
