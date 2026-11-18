@@ -29,10 +29,15 @@ for b in "$@"; do
   done
   new=$(tail -n +$(( n0 + 1 )) $SLOG)
   stamps=(${(f)"$(print -r -- $new | sed -n 's/.*(log tag \([0-9-]*\)).*/\1/p')"})
-  bad=0; for s in $stamps; do for f in $LOGS/pair-$s-[0-9A-F]*.log(N); do (( bad += $(grep -cE 'REANCHOR|starved|Splice-padded' $f) )); done; done
+  # 一次斷流會在 log 記好幾行（Splice-padded 加 REANCHOR，有時兩台都記），看門狗則每次斷流重啟一次，用重啟次數算
+  bad=$(print -r -- $new | grep -c 'restart:')
   { echo "=== $b ms（$(date +%H:%M)）起播 $stamp"
-    echo "斷流／REANCHOR $bad 次，看門狗重啟 $(print -r -- $new | grep -c 'restart:') 次${gave:+，自癒放棄}"
+    echo "斷流 $bad 次（看門狗重啟次數）${gave:+，自癒放棄}"
     grep 'lead_ms' $LOGS/pair-$stamps[-1]-split.log | tail -1
+    # tap 照常每 20 ms 一塊時，lead 最大值應該是 T − t0 加一塊：多出很多就是起播時舊樣本把延遲拉長了
+    T=$(grep -A3 "log tag $stamps[-1]" $SLOG | sed -n 's/.*START_UNIX_MS=//p' | head -1)
+    t0=$(sed -n 's/.*t0_unix=//p' $LOGS/pair-$stamps[-1]-split.log | head -1)
+    [[ -n $T && -n $t0 ]] && printf 'T − t0 %.1f ms\n' $(( T - t0 * 1000 ))
     # 喇叭漏收封包時會要求重傳（cliairplay patch 0003 每 5 秒印一次）。age 是封包送出到被要求的時間，接近緩衝減 HomePod 處理時間就來不及補
     # 沒有 retransmit 行的那台記為 0：可能真的沒漏包，也可能還沒滿 5 秒就結束
     spk=(); for s in $stamps; do spk+=($LOGS/pair-$s-[0-9A-F]*.log(N)); done

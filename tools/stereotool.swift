@@ -89,6 +89,7 @@ func split(_ argv: [String]) {
     let fs = 44100.0
     let idle = Int(0.080 * fs)      // 輸入落後超過 80 ms 才當成斷流補靜音；一般抖動（±20 ms）不動作
     let maxAhead = Int(0.060 * fs)  // 輸入比基準超前 60 ms 以上就丟
+    let chunk = Int(0.020 * fs)     // tap 一塊的長度（run_pair 的 audiotee --chunk-duration 0.02）
     enum Mode { case left, right, both, zero, closed }
     func parseMode(_ m: Substring) -> Mode? {
         switch m {
@@ -248,6 +249,14 @@ func split(_ argv: [String]) {
         pollRoutes(nowNs)
         let elapsed = Double(nowNs - t0) / 1e9
         let due = Int(elapsed * fs)  // 照牆鐘此刻應該輸出到第幾個 frame
+        if pending.count >= 4, starved {  // 先把 pipe 裡已經積著的都讀出來：同一批分幾次讀進來時，下面才不會只裁到第一次
+            // shortcut: audiotee 逐塊寫，讀空的當下它若還沒寫完積壓，剩下的一兩塊會走 maxAhead 被留下；sweep 印的 lead 與 T − t0 差超過約 25 ms 就要改成看一段時間內的積壓
+            while true {
+                let more = buf.withUnsafeMutableBytes { read(0, $0.baseAddress!, $0.count) }
+                if more <= 0 { break }
+                pending.append(contentsOf: buf[0..<more])
+            }
+        }
         let frames = pending.count / 4
         if frames > 0 {
             if starved, written < due {  // 晚到的那段補成靜音，這批才會在「收到時刻 + (T − t0)」播出，延遲固定
@@ -255,8 +264,9 @@ func split(_ argv: [String]) {
                 silenceFrames += due - written
                 zeros.withUnsafeBufferPointer { emitAdvancing($0) }
             }
+            // 起播或斷流後的第一批只留最新一塊：tap 先積了一些的話，舊樣本會把延遲永遠拉長那一段（maxAhead 只管 60 ms 以上）
+            let take = min(frames, max(0, due + (starved ? chunk : maxAhead) - written))
             starved = false
-            let take = min(frames, max(0, due + maxAhead - written))
             droppedFrames += frames - take
             if take > 0 {  // 丟最舊的、留最新的，延遲才不會被拉長
                 pending.withUnsafeBytes { raw in
