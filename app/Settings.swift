@@ -94,9 +94,7 @@ final class SettingsModel: ObservableObject {
     @Published var appliedSync = Int(readSetting(syncFile)) ?? 0  // what's saved for the service
     @Published var appliedBuffer = readBuffer()  // what's saved for the service
     @Published var bufferChoice = bufferChoiceFor(readBuffer())  // 0 = Custom
-    @Published var customBuffer = readBuffer() {  // what the Custom field shows
-        didSet { let c = min(max(customBuffer, bufferRange.lowerBound), bufferRange.upperBound); if c != customBuffer { customBuffer = c } }
-    }
+    @Published var customBuffer = readBuffer()  // what the Custom field shows; not clamped, so a bad entry stays visible instead of turning into 120
     @Published var canAlign = false  // the Mac and at least one HomePod are playing
     @Published var aligning = false
     @Published var syncStatus = ""
@@ -156,6 +154,7 @@ final class SettingsModel: ObservableObject {
         if c == 0 { bufferChoice = 0; customBuffer = appliedBuffer } else if writeSetting(bufferFile, String(c)) { appliedBuffer = c; bufferChoice = c }
     }
     func applyBuffer() {
+        guard bufferRange.contains(customBuffer), customBuffer != appliedBuffer else { return }  // 同值也寫檔會讓服務重啟串流
         if writeSetting(bufferFile, String(customBuffer)) { appliedBuffer = customBuffer; bufferChoice = bufferChoiceFor(customBuffer) }
     }
     func revertBuffer() { customBuffer = appliedBuffer }
@@ -302,14 +301,15 @@ struct AudioPane: View {
                     ForEach(bufferPresets, id: \.ms) { Text($0.label).tag($0.ms) }
                     Text(t("Custom", "自訂")).tag(0)
                 }
+                .labelsHidden()  // 區塊標題已經是「緩衝」
                 .disabled(model.aligning)  // 選預設檔會立刻寫檔、重啟串流，量測中不能動
                 if model.bufferChoice == 0 {
-                    LabeledContent(t("Buffer", "緩衝")) {
+                    LabeledContent(t("Custom value", "自訂值")) {
                         HStack(spacing: 4) {
-                            TextField(t("Buffer", "緩衝"), value: $model.customBuffer, format: .number)
+                            TextField(t("Custom value", "自訂值"), value: $model.customBuffer, format: .number)
                                 .labelsHidden().multilineTextAlignment(.trailing).frame(width: 52)
                             Text("ms").foregroundStyle(.secondary)
-                            Stepper(t("Buffer", "緩衝"), value: $model.customBuffer, in: bufferRange).labelsHidden()
+                            Stepper(t("Custom value", "自訂值"), value: $model.customBuffer, in: bufferRange).labelsHidden()
                         }
                     }
                     if model.customBuffer != model.appliedBuffer {
@@ -322,9 +322,10 @@ struct AudioPane: View {
                                 }
                                 .keyboardShortcut(.defaultAction)
                             }
-                            .disabled(model.aligning)  // a write now would restart the stream mid-measurement
+                            .disabled(model.aligning || !bufferRange.contains(model.customBuffer))  // a write now would restart the stream mid-measurement
                         } label: {
-                            Text(t("Not applied", "尚未套用"))
+                            Text(bufferRange.contains(model.customBuffer) ? t("Not applied", "尚未套用")
+                                 : t("Enter 120–500 ms", "請輸入 120–500 ms"))
                         }
                     }
                 }
