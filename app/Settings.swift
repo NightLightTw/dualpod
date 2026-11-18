@@ -23,6 +23,8 @@ func parseBuffer(_ s: String) -> Int {
     guard !s.isEmpty, s.allSatisfy({ $0.isASCII && $0.isNumber }), let n = Int(s), bufferRange.contains(n) else { return bufferDefault }
     return n
 }
+/// 和 serve 的 `read_user buffer-ms | tr -d ' \n'` 讀法一樣（不跟隨 symlink、非阻塞、前 64 bytes），App 顯示的才會是服務實際用的值
+func readBuffer() -> Int { parseBuffer(readGlowFile(bufferFile).filter { $0 != " " && $0 != "\n" }) }
 /// Picker 的值：預設選項用它的毫秒數，其他數值是 0（自訂）
 func bufferChoiceFor(_ ms: Int) -> Int { bufferPresets.contains { $0.ms == ms } ? ms : 0 }
 
@@ -90,9 +92,9 @@ final class SettingsModel: ObservableObject {
         }
     }
     @Published var appliedSync = Int(readSetting(syncFile)) ?? 0  // what's saved for the service
-    @Published var appliedBuffer = parseBuffer(readSetting(bufferFile))  // what's saved for the service
-    @Published var bufferChoice = bufferChoiceFor(parseBuffer(readSetting(bufferFile)))  // 0 = Custom
-    @Published var customBuffer = parseBuffer(readSetting(bufferFile)) {  // what the Custom field shows
+    @Published var appliedBuffer = readBuffer()  // what's saved for the service
+    @Published var bufferChoice = bufferChoiceFor(readBuffer())  // 0 = Custom
+    @Published var customBuffer = readBuffer() {  // what the Custom field shows
         didSet { let c = min(max(customBuffer, bufferRange.lowerBound), bufferRange.upperBound); if c != customBuffer { customBuffer = c } }
     }
     @Published var canAlign = false  // the Mac and at least one HomePod are playing
@@ -116,6 +118,7 @@ final class SettingsModel: ObservableObject {
     /// 切去預設色再切回來時，自訂色要還在
     private(set) var lastCustom: String?
     /// 設定視窗每次出現都重讀，外部改了檔（例如手動編輯）才會反映出來
+    func reloadBuffer() { appliedBuffer = readBuffer(); bufferChoice = bufferChoiceFor(appliedBuffer); customBuffer = appliedBuffer }
     func reloadGlow() {
         glow = parseGlow(readGlowFile())
         if glow.hasPrefix("custom:#") { lastCustom = glow }
