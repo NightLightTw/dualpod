@@ -20,7 +20,7 @@ RUNDIR_FILE=$STATE/rundir  # 目前 run_pair 的暫存資料夾（裡面有每�
 SPEAKERS=$STATE/speakers  # 找到的喇叭：「ID<tab>IP<tab>名稱」，App 也讀這份
 DEVICES=${DEVICES:-}
 LATENCY=200 TARGET=200  # 預設。11-12 實測再低會單台 REANCHOR，但當時 split 起播位置還會隨機少 0–80 ms（6dfdb28 已修）
-[[ ${BUFFER_MS:-} == <50-300> ]] && LATENCY=$BUFFER_MS TARGET=$BUFFER_MS  # 設定視窗選的緩衝（serve 從使用者的 buffer-ms 讀來）
+[[ ${BUFFER_MS:-} == <120-500> ]] && LATENCY=$BUFFER_MS TARGET=$BUFFER_MS  # 設定視窗選的緩衝（serve 從使用者的 buffer-ms 讀來）
 # 任何一行出現就代表兩台可能不再對齊（單台平移時間軸、斷流、結束）
 BAD='REANCHOR|anchor_corrected|content_cut|\[STATUS\] (error|eof|stopped)|PCM input starved|Splice-padded'
 MAX_RESTARTS=5 WINDOW_S=300 POLL_S=${POLL_S:-2}
@@ -371,11 +371,14 @@ case ${1:-status} in
       done
       [[ $line == "ready "<->" ."<-> ]] || exit 1
       SFX[$j]=${line##* }
-      # T2 比現在晚 600 ms：split 要在 T2 − TARGET（200）就寫到那個 frame，它最多超前 60 ms、每 100 ms 才讀一次路由檔；
+      # T2 比現在晚 max(600, TARGET + 400) ms：split 要在 T2 − TARGET 就寫到那個 frame，它最多超前 60 ms、每 100 ms 才讀一次路由檔；
       # 之後 cliairplay 還要求 START 至少早 250 ms 送到。時鐘剛就緒時 ready_at 可能還在未來，取較晚的
+      st=$(cat $rd/latency 2>/dev/null)  # run_pair 寫的，等於 TARGET；不合就當預設
+      [[ $st == <120-500> ]] || st=200
       nowms=$($TOOL now $off)
       T2=${${line#ready }% *}
-      (( T2 < nowms + 600 )) && T2=$(( nowms + 600 ))
+      min2=$(( st + 400 > 600 ? st + 400 : 600 ))
+      (( T2 < nowms + min2 )) && T2=$(( nowms + min2 ))
       (( T2 - nowms <= 3000 )) || exit 1
       tag=@$T2
     fi
@@ -464,7 +467,7 @@ case ${1:-status} in
           # 只是裝置組合變動（少一台、開關 Mac）就不中斷留下的輸出；reroute 做不到才關了再開
           if ! { [[ -z $cfg_changed ]] && running && LEFT=$left zsh $0 reroute ${=want} }; then
             running && zsh $0 off
-            buf=$(read_user $dir/buffer-ms | tr -d ' \n')  # 範圍由 on 那邊的 <50-300> 驗證，不合就用預設
+            buf=$(read_user $dir/buffer-ms | tr -d ' \n')  # 範圍由 on 那邊的 <120-500> 驗證，不合就用預設
             LEFT=$left LOCAL_ADJ_MS=$adj BUFFER_MS=$buf zsh $0 on ${=want}
           else vdone=""  # 播放中加入的那台也要收到存成 0 的音量
           fi

@@ -146,9 +146,10 @@ if [[ ${1:-} == live ]]; then
 fi
 
 MODE=${1:-test}
-LEAD_MS=2000
-[[ $MODE == live* ]] && LEAD_MS=300  # cliairplay 要求 START 至少比當下晚 250 ms（AP2_MIN_WARM_LEAD_MS）
 TARGET_MS=${3:-300}  # 第三個參數：AirPlay 這段的目標延遲＝START 時刻 − split 開始寫的時刻
+LEAD_MS=2000
+# cliairplay 要求 START 至少比當下晚 250 ms（AP2_MIN_WARM_LEAD_MS）。split 從 T − TARGET 開始寫，LEAD 不到 TARGET 那一刻就已過去
+[[ $MODE == live* ]] && LEAD_MS=$(( TARGET_MS + 200 > 300 ? TARGET_MS + 200 : 300 ))
 T=$(( $(now_ms) + LEAD_MS ))
 print $T > $RUN/start_ms.tmp && mv -f $RUN/start_ms.tmp $RUN/start_ms  # split 的 frame k 在 T + k/44100 秒播出，join 靠它換算
 for n in $HP; do printf 'START_UNIX_MS=%d\nACTION=START\n' $T > $RUN/cmd-$n; done

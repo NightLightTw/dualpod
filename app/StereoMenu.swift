@@ -302,7 +302,7 @@ final class App: NSObject, NSApplicationDelegate {
         let streaming = shown.contains { $0 != "Mac" }
         item.button?.image = streaming ? Self.iconPlaying : Self.iconIdle
         header.title = pending != nil ? t("Output · switching…", "輸出 · 切換中…")
-            : streaming ? t("Output · ~0.3 s latency", "輸出 · 延遲約 0.3 秒")
+            : streaming ? t("Output · \(parseBuffer(readSetting(bufferFile))) ms buffer", "輸出 · 緩衝 \(parseBuffer(readSetting(bufferFile))) ms")
             : speakers.isEmpty ? t("Output · looking for speakers…", "輸出 · 正在尋找喇叭…") : t("Output", "輸出")
         let helper = helperState(first)
         warning.title = helper == "missing" ? t("Install Background Helper…", "安裝背景服務…")

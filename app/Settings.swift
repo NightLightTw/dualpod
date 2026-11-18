@@ -6,8 +6,25 @@ import SwiftUI
 
 let leftFile = wantFile.deletingLastPathComponent().appendingPathComponent("left")
 let syncFile = wantFile.deletingLastPathComponent().appendingPathComponent("mac-sync-ms")
+let bufferFile = wantFile.deletingLastPathComponent().appendingPathComponent("buffer-ms")
 let glowFile = wantFile.deletingLastPathComponent().appendingPathComponent("glow")
 let alignRestoreFile = wantFile.deletingLastPathComponent().appendingPathComponent("align-restore")
+
+let bufferRange = 120...500
+let bufferDefault = 200
+/// 預設的緩衝選項，App 與選單標題共用這張表
+var bufferPresets: [(ms: Int, label: String)] {
+    [(120, t("Low latency (120 ms)", "低延遲（120 ms）")),
+     (bufferDefault, t("Standard (200 ms, default)", "標準（200 ms，預設）")),
+     (500, t("Stable (500 ms)", "穩定（500 ms）"))]
+}
+/// 和 stereo.sh 的 <120-500> 同一條規則：只收純數字，其餘（含空檔、超出範圍）都用預設
+func parseBuffer(_ s: String) -> Int {
+    guard !s.isEmpty, s.allSatisfy({ $0.isASCII && $0.isNumber }), let n = Int(s), bufferRange.contains(n) else { return bufferDefault }
+    return n
+}
+/// Picker 的值：預設選項用它的毫秒數，其他數值是 0（自訂）
+func bufferChoiceFor(_ ms: Int) -> Int { bufferPresets.contains { $0.ms == ms } ? ms : 0 }
 
 func readSetting(_ url: URL) -> String {
     ((try? String(contentsOf: url, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,6 +90,11 @@ final class SettingsModel: ObservableObject {
         }
     }
     @Published var appliedSync = Int(readSetting(syncFile)) ?? 0  // what's saved for the service
+    @Published var appliedBuffer = parseBuffer(readSetting(bufferFile))  // what's saved for the service
+    @Published var bufferChoice = bufferChoiceFor(parseBuffer(readSetting(bufferFile)))  // 0 = Custom
+    @Published var customBuffer = parseBuffer(readSetting(bufferFile)) {  // what the Custom field shows
+        didSet { if customBuffer != max(bufferRange.lowerBound, min(bufferRange.upperBound, customBuffer)) { customBuffer = max(bufferRange.lowerBound, min(bufferRange.upperBound, customBuffer)) } }
+    }
     @Published var canAlign = false  // the Mac and at least one HomePod are playing
     @Published var aligning = false
     @Published var syncStatus = ""
@@ -126,6 +148,14 @@ final class SettingsModel: ObservableObject {
         }
     }
     func revertSync() { sync = appliedSync }
+    /// A preset writes at once; Custom only reveals the field. A failed write keeps the old choice
+    func chooseBuffer(_ c: Int) {
+        if c == 0 { bufferChoice = 0; customBuffer = appliedBuffer } else if writeSetting(bufferFile, String(c)) { appliedBuffer = c; bufferChoice = c }
+    }
+    func applyBuffer() {
+        if writeSetting(bufferFile, String(customBuffer)) { appliedBuffer = customBuffer; bufferChoice = bufferChoiceFor(customBuffer) }
+    }
+    func revertBuffer() { customBuffer = appliedBuffer }
 }
 
 /// Plays a soft chime on the left channel, then a higher one on the right, through the normal system
@@ -262,6 +292,43 @@ struct AudioPane: View {
                 Text(model.sync == 0 ? t("The Mac plays together with the HomePods.", "Mac 和 HomePod 同時播。")
                      : model.sync < 0 ? t("The Mac plays \(-model.sync) ms earlier than the HomePods.", "Mac 比 HomePod 早 \(-model.sync) ms 播。")
                      : t("The Mac plays \(model.sync) ms later than the HomePods.", "Mac 比 HomePod 晚 \(model.sync) ms 播。"))
+                    .foregroundStyle(.secondary)
+            }
+            Section {
+                Picker(t("Buffer", "緩衝"), selection: Binding(get: { model.bufferChoice }, set: model.chooseBuffer)) {
+                    ForEach(bufferPresets, id: \.ms) { Text($0.label).tag($0.ms) }
+                    Text(t("Custom", "自訂")).tag(0)
+                }
+                if model.bufferChoice == 0 {
+                    LabeledContent(t("Buffer", "緩衝")) {
+                        HStack(spacing: 4) {
+                            TextField(t("Buffer", "緩衝"), value: $model.customBuffer, format: .number)
+                                .labelsHidden().multilineTextAlignment(.trailing).frame(width: 52)
+                            Text("ms").foregroundStyle(.secondary)
+                            Stepper(t("Buffer", "緩衝"), value: $model.customBuffer, in: bufferRange).labelsHidden()
+                        }
+                    }
+                    if model.customBuffer != model.appliedBuffer {
+                        LabeledContent {
+                            HStack {
+                                Button(t("Revert", "還原"), action: model.revertBuffer)
+                                Button(t("Apply", "套用")) {
+                                    NSApp.keyWindow?.makeFirstResponder(nil)  // commit typed text first, as for the offset
+                                    DispatchQueue.main.async { model.applyBuffer() }
+                                }
+                                .keyboardShortcut(.defaultAction)
+                            }
+                            .disabled(model.aligning)  // a write now would restart the stream mid-measurement
+                        } label: {
+                            Text(t("Not applied", "尚未套用"))
+                        }
+                    }
+                }
+            } header: {
+                Text(t("Buffer", "緩衝"))
+            } footer: {
+                Text(t("A larger buffer can reduce audio dropouts but increases latency. If you hear dropouts, increase the buffer. The speakers reconnect for a few seconds when it changes.",
+                       "較大的緩衝可降低斷音機率，但會增加延遲。若出現斷音，請增加緩衝。變更時喇叭會重新連線幾秒。"))
                     .foregroundStyle(.secondary)
             }
         }
