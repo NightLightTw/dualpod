@@ -37,9 +37,10 @@ You need an Apple silicon Mac on macOS 14.4 or later, and Xcode or the Command L
 
 Match the style of the code around your change, and write comments that explain why, not what.
 
-1. Fork and clone the repository, then build from its root:
+1. Fork and clone the repository, switch to the `dev` branch, then build from its root:
 
    ```bash
+   git switch dev
    zsh scripts/fetch-deps.sh
    zsh app/build.sh
    ```
@@ -63,7 +64,7 @@ Match the style of the code around your change, and write comments that explain 
 
 ### Send it
 
-Push a branch to your fork and open the pull request against `main`. In the description, say what changed and which HomePod models and software versions you tested with, if any. Link the issue if there is one. For a bug fix without an issue, include what [Reporting a bug](#reporting-a-bug) asks for: the diagnostics, the HomePod model and software version, and what you did, expected, and saw. Keep "Allow edits from maintainers" on, so small fixes can be pushed to your branch instead of going back and forth.
+Push a branch to your fork and open the pull request against `dev`. `main` only changes when a version is released, so a pull request against `main` will be retargeted. In the description, say what changed and which HomePod models and software versions you tested with, if any. Link the issue if there is one. For a bug fix without an issue, include what [Reporting a bug](#reporting-a-bug) asks for: the diagnostics, the HomePod model and software version, and what you did, expected, and saw. Keep "Allow edits from maintainers" on, so small fixes can be pushed to your branch instead of going back and forth.
 
 ## License
 
