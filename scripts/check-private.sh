@@ -30,7 +30,8 @@ for c in ${(f)commits}; do
   names=$(git diff --name-only --diff-filter=ACR $parent $c) || die "git diff --name-only $c 失敗"
   msg=$(git log -1 --format=%B $c) || die "git log $c 失敗"
   text=$msg$'\n'$names$'\n'${(F)${(M)${(f)diff}:#>*}#>}
-  mails=$(git log -1 --format='%ae%n%ce' $c | grep -viE '^[^@]+@users\.noreply\.github\.com$|^noreply@[^@]+$') && {
+  ids=$(git log -1 --format='%ae%n%ce' $c) || die "git log $c 失敗"
+  mails=$(print -r -- $ids | grep -viE '^[^@]+@users\.noreply\.github\.com$|^noreply@[^@]+$') && {
     print -r -- "✗ $(git log -1 --format='%h %s' $c)：作者或提交者 email 不是 noreply（git config user.email 改成 GitHub 給的 noreply 位址）"
     print -r -- $mails | sort -u | sed 's/^/    /'; found=1 }
   for r in $rules; do
