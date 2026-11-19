@@ -1,0 +1,162 @@
+Modified by DualPod, 2026-11: a MEDIATYPE command (music or video) and CLIAIRPLAY_MEDIA_TYPE, so declaring video turns a HomePod's Sound Glow off during playback.
+
+diff --git a/src/ap2_mrp.c b/src/ap2_mrp.c
+index de6563a..d4edaca 100644
+--- a/src/ap2_mrp.c
++++ b/src/ap2_mrp.c
+@@ -1869,6 +1869,26 @@ int ap2_mrp_event_status(struct ap2_mrp_ctx *m)
+     return atomic_load(&m->event_connected) ? 1 : 0;
+ }
+ 
++/* The media type the now-playing push declares: music (the default) or
++ * video. A HomePod's Sound Glow stays off while video plays, so declaring
++ * video darkens the light during playback without touching the audio.
++ * One process drives one receiver, so this is process-wide. */
++static atomic_bool g_np_video = false;
++
++bool ap2_mrp_set_media_type(const char *type)
++{
++    if (!type) return false;
++    if (strcmp(type, "music") == 0) atomic_store(&g_np_video, false);
++    else if (strcmp(type, "video") == 0) atomic_store(&g_np_video, true);
++    else return false;
++    return true;
++}
++
++bool ap2_mrp_media_type_is_video(void)
++{
++    return atomic_load(&g_np_video);
++}
++
+ bool ap2_mrp_build_nowplaying_command(struct ap2_mrp_ctx *m,
+                                       uint8_t **out, int *out_len)
+ {
+@@ -1904,8 +1924,16 @@ bool ap2_mrp_build_nowplaying_command(struct ap2_mrp_ctx *m,
+     ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoTimestamp",
+                     ap2_pl_date(m->elapsed_set_at > 0.0 ? m->elapsed_set_at
+                                                         : mrp_cf_now()));
+-    ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoMediaType",
+-                    ap2_pl_string("MRMediaRemoteMediaTypeMusic"));
++    if (atomic_load(&g_np_video)) {
++        /* The keys and values an iPhone sends, with "video" for "audio". */
++        ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoMediaType",
++                        ap2_pl_string("kMRMediaRemoteNowPlayingInfoTypeVideo"));
++        ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoStrictMediaType",
++                        ap2_pl_string("video"));
++    } else {
++        ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoMediaType",
++                        ap2_pl_string("MRMediaRemoteMediaTypeMusic"));
++    }
+     ap2_pl_dict_set(info, "kMRMediaRemoteNowPlayingInfoUniqueIdentifier",
+                     ap2_pl_int((int64_t)m->np_uid));
+     if (m->artwork && m->artwork_len > 0) {
+diff --git a/src/ap2_mrp.h b/src/ap2_mrp.h
+index 9796089..8fe2714 100644
+--- a/src/ap2_mrp.h
++++ b/src/ap2_mrp.h
+@@ -288,6 +288,9 @@ int ap2_mrp_event_status(struct ap2_mrp_ctx *m);
+  * :param out_len: receives the byte count.
+  * :returns: true on success.
+  */
++/* "music" or "video"; anything else is refused and changes nothing. */
++bool ap2_mrp_set_media_type(const char *type);
++bool ap2_mrp_media_type_is_video(void);
+ bool ap2_mrp_build_nowplaying_command(struct ap2_mrp_ctx *m,
+                                       uint8_t **out, int *out_len);
+ 
+diff --git a/src/cliairplay.c b/src/cliairplay.c
+index a872591..c382b93 100644
+--- a/src/cliairplay.c
++++ b/src/cliairplay.c
+@@ -761,6 +761,19 @@ static void handle_announce(const cli_config_t *cfg)
+ 
+ static void handle_command(const char *key, const char *value, cli_config_t *cfg)
+ {
++    if (strcmp(key, "MEDIATYPE") == 0) {
++        /* Before the first START this only sets what the opening push
++         * declares; once now-playing has gone out, a change re-pushes it. */
++        bool was_video = ap2_mrp_media_type_is_video();
++        if (!ap2_mrp_set_media_type(value)) {
++            LOG_WARN("MEDIATYPE must be music or video, ignoring '%s'", value);
++        } else if (was_video != ap2_mrp_media_type_is_video() && g_ap2cl &&
++                   (g_first_start_done || g_real_metadata_sent)) {
++            int status = ap2cl_mrp_push(g_ap2cl);
++            LOG_INFO("MEDIATYPE=%s now-playing push -> %d", value, status);
++        }
++        return;
++    }
+     if (strcmp(key, "TITLE") == 0) {
+         metadata_set(&g_metadata.title, value);
+     } else if (strcmp(key, "ARTIST") == 0) {
+@@ -2460,6 +2473,12 @@ int main(int argc, char *argv[])
+         return 1;
+     }
+ 
++    /* The media type to open with, so a session can start with it already set. */
++    const char *media_type = getenv("CLIAIRPLAY_MEDIA_TYPE");
++    if (media_type && *media_type && !ap2_mrp_set_media_type(media_type)) {
++        LOG_WARN("CLIAIRPLAY_MEDIA_TYPE must be music or video, ignoring '%s'", media_type);
++    }
++
+     /* Setup signal handlers */
+     signal(SIGINT, signal_handler);
+     signal(SIGTERM, signal_handler);
+diff --git a/tests/test_ap2_event.c b/tests/test_ap2_event.c
+index 1b66ce1..19c9a4f 100644
+--- a/tests/test_ap2_event.c
++++ b/tests/test_ap2_event.c
+@@ -280,6 +280,46 @@ static bool contains_bytes(const uint8_t *haystack, int haystack_len,
+     return false;
+ }
+ 
++static bool snapshot_has(struct ap2_mrp_ctx *mrp, const char *text)
++{
++    uint8_t *snap = NULL;
++    int len = 0;
++    assert(ap2_mrp_build_nowplaying_command(mrp, &snap, &len));
++    bool found = contains_bytes(snap, len, (const uint8_t *)text, (int)strlen(text));
++    free(snap);
++    return found;
++}
++
++/* MEDIATYPE: music is the default and unchanged; video swaps in the iPhone's
++ * video keys; anything else is refused and leaves the current type. */
++static void test_media_type(const uint8_t secret[KEY_SIZE])
++{
++    struct ap2_mrp_ctx *mrp = ap2_mrp_create(
++        "127.0.0.1", 7000, NULL, "1A2B3D4EA1B2C3D4",
++        "Music Assistant", "11111111-2222-4333-8444-5555555555ab",
++        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", secret, KEY_SIZE);
++    assert(mrp);
++    assert(!ap2_mrp_media_type_is_video());
++    assert(snapshot_has(mrp, "MRMediaRemoteMediaTypeMusic"));
++    assert(!snapshot_has(mrp, "StrictMediaType"));
++
++    assert(ap2_mrp_set_media_type("video"));
++    assert(ap2_mrp_media_type_is_video());
++    assert(snapshot_has(mrp, "kMRMediaRemoteNowPlayingInfoTypeVideo"));
++    assert(snapshot_has(mrp, "kMRMediaRemoteNowPlayingInfoStrictMediaType"));
++    assert(!snapshot_has(mrp, "MRMediaRemoteMediaTypeMusic"));
++
++    assert(!ap2_mrp_set_media_type("Video"));
++    assert(!ap2_mrp_set_media_type(""));
++    assert(!ap2_mrp_set_media_type(NULL));
++    assert(ap2_mrp_media_type_is_video());
++
++    assert(ap2_mrp_set_media_type("music"));
++    assert(snapshot_has(mrp, "MRMediaRemoteMediaTypeMusic"));
++    assert(!snapshot_has(mrp, "StrictMediaType"));
++    ap2_mrp_destroy(mrp);
++}
++
+ static void test_artwork_snapshot_generation(const uint8_t secret[KEY_SIZE])
+ {
+     static const uint8_t first_art[] =
+@@ -407,6 +447,7 @@ int main(void)
+     derive_key(secret, "Events-Write-Encryption-Key", receiver_key);
+     derive_key(secret, "Events-Read-Encryption-Key", sender_key);
+     test_artwork_snapshot_generation(secret);
++    test_media_type(secret);
+     test_transient_kdf_secret();
+ 
+     int sockets[2];
