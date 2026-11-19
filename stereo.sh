@@ -116,6 +116,21 @@ reread_devices() {
   true
 }
 
+# 系統能力的音訊位元（kIOPMSystemCapabilityAudio＝4）沒開就是睡眠或 DarkWake。讀不到就當醒著
+awake() {
+  local c=${POWER_CAPS:-$(ioreg -n IOPMrootDomain -d1 -r 2>/dev/null | sed -n 's/.*"System Capabilities" = \([0-9]*\).*/\1/p' | head -1)}
+  [[ $c != <-> ]] || (( c & 4 ))
+}
+# 和 run_pair 一樣要預設路由那張網卡有 IPv4（run_pair 拿它當 --if）。剛醒來 Wi-Fi 常晚幾秒，這時起播只會白白失敗
+# shortcut: 有 IPv4 不代表喇叭已經連得到，醒來後仍可能多失敗一兩次；真的遇到再加 ping 喇叭
+net_ready() { [[ -n $(ipconfig getifaddr $(route -n get default 2>/dev/null | awk '/interface:/ {print $2}') 2>/dev/null) ]] }
+# 核心記的上次入睡時間（kern.sleeptime）晚於給定時刻，就是之後睡過。讀不到當沒睡過
+slept_since() {
+  local w=(${=$(sysctl -n kern.sleeptime 2>/dev/null)})  # { sec = 1795013485, usec = … }
+  local t=${${w[4]:-}%,}
+  [[ $t == <-> ]] && (( t > $1 ))
+}
+
 supervise() {
   trap '' HUP
   say "supervisor pid $$ as $(whoami)"
@@ -125,7 +140,15 @@ supervise() {
   local stamp="" snap reason now recent t began_at=0 summarized=""
   # 收到停止時，這段還沒寫摘要才補一列（重啟等待中收到的不重複記）
   trap 'say "stop requested"; [[ -n ${child:-} ]] && kill -TERM $child 2>/dev/null; stop_all; [[ -n $stamp && $stamp != $summarized ]] && summarize $stamp user_stop $began_at; rm -f $PIDFILE; exit 0' TERM INT
+  local ended=0
   while true; do
+    slept_since $ended && restarts=()  # 上一段結束後睡過，醒來重新計算次數
+    # 睡眠、DarkWake、剛醒網路還沒回來時都不起播：這時一定失敗，只會把重啟次數用光（等多久都不算次數）
+    if ! { awake && net_ready }; then
+      say "waiting for full wake and network"
+      until awake && net_ready; do sleep $POLL_S & wait $!; done
+      say "awake: connecting"
+    fi
     reread_devices
     stamp=$(date +%y%m%d-%H%M%S) began_at=$(date +%s)  # 含日期：跨日同一秒不會覆寫還在保留期的 log
     say "start $DEVICES left=${LEFT:-} mac_sync_ms=${LOCAL_ADJ_MS:-0} buffer_ms=$TARGET (log tag $stamp)"
@@ -151,6 +174,8 @@ supervise() {
     kill -9 $child 2>/dev/null; wait $child 2>/dev/null; stop_all
     summarize $stamp ${reason%%:*} $began_at
     summarized=$stamp
+    ended=$(date +%s)
+    if ! awake || slept_since $began_at; then restarts=(); continue; fi  # 睡眠造成的中斷不算，醒來從頭計算
     now=$(date +%s); restarts+=($now); recent=0
     for t in $restarts; do (( now - t < WINDOW_S )) && (( recent++ )); done
     if (( recent > MAX_RESTARTS )); then
