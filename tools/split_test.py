@@ -34,9 +34,9 @@ def body(b):
     a = array.array("h", b[: len(b) // 2 * 2]); i = 0
     while i < len(a) and a[i] == 0: i += 1
     return list(a[i:])
-# 起播時第一塊若晚讀、和下一塊一起到，split 會當成積壓只留最新一塊，所以內容可以從後面的樣本開始；之後要原樣連續到結尾
+# 起播時若 split 還沒讀、已經積了好幾塊，會當成積壓只留最新一塊，所以內容可以從後面某一塊的開頭開始；之後要原樣連續到結尾
 k1 = abs(body(got[2])[0])  # LR 輸出的第一個樣本編號
-assert k1 <= 882 + 1, f"開頭最多只能少一塊（從第 {k1} 個 frame 開始）"
+assert (k1 - 1) % 882 == 0 and k1 - 1 < n, f"開頭只能少整數塊、而且不能全丟（從第 {k1} 個 frame 開始）"
 L, R = list(src[0::2])[k1 - 1:], list(src[1::2])[k1 - 1:]
 dup = lambda x: [v for v in x for _ in (0, 1)]
 want = list(src)[(k1 - 1) * 2:]  # 結尾之後 split 會補靜音，只比到來源結束
