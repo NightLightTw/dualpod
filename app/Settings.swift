@@ -399,8 +399,8 @@ struct GlowPane: View {
             } header: {
                 Text(t("Sound Glow", "聲波光暈"))
             } footer: {
-                Text(t("Needs HomePod software 27.2 and Sound Glow turned on in the Home app. Turning it off takes effect the next time playback starts.",
-                       "需要 HomePod 軟體 27.2，並在「家庭」App 開啟聲波光暈。關閉要等下次開始播放才生效。"))
+                Text(t("Needs HomePod software 27.2 and Sound Glow turned on in the Home app.",
+                       "需要 HomePod 軟體 27.2，並在「家庭」App 開啟聲波光暈。"))
                     .foregroundStyle(.secondary)
             }
         }

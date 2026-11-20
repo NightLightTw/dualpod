@@ -12,6 +12,7 @@ DualPod is licensed under the GNU General Public License, version 3 (see [LICENS
   - `patches/airplay-cli/0001-upstream-pr100-homepod-mini-2-ptp.diff` is the change proposed upstream in music-assistant/airplay-cli pull request #100 by Jonathan Delgado. It fixes the HomePod mini (2nd generation) staying silent.
   - `patches/airplay-cli/0002-bind-ptp-to-interface-on-macos.diff` binds PTP ports 319/320 to the chosen interface address, because macOS's own gPTP holds the wildcard sockets.
   - `patches/airplay-cli/0003-log-retransmit-requests.diff` logs, every 5 seconds and when a stream stops, how many lost packets the speaker asked to have resent, and how long after a packet was sent the request for it arrived. DualPod uses it to tell whether a smaller buffer leaves too little time to recover lost packets.
+  - `patches/airplay-cli/0004-media-type-command.diff` adds a `MEDIATYPE` command (`music` or `video`) and a `CLIAIRPLAY_MEDIA_TYPE` setting for the type the now-playing info declares. A HomePod's Sound Glow stays off while video plays, so DualPod declares video when Glow is off.
 
 ## audiotee
 

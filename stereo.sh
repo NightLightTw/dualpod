@@ -137,7 +137,7 @@ supervise() {
   echo $$ > $PIDFILE
   print -r -- $DEVICES > $DEVFILE
   local -a restarts
-  local stamp="" snap reason now recent t began_at=0 summarized=""
+  local stamp="" snap reason now recent t began_at=0 summarized="" mt
   # 收到停止時，這段還沒寫摘要才補一列（重啟等待中收到的不重複記）
   trap 'say "stop requested"; [[ -n ${child:-} ]] && kill -TERM $child 2>/dev/null; stop_all; [[ -n $stamp && $stamp != $summarized ]] && summarize $stamp user_stop $began_at; rm -f $PIDFILE; exit 0' TERM INT
   local ended=0
@@ -152,7 +152,9 @@ supervise() {
     reread_devices
     stamp=$(date +%y%m%d-%H%M%S) began_at=$(date +%s)  # 含日期：跨日同一秒不會覆寫還在保留期的 log
     say "start $DEVICES left=${LEFT:-} mac_sync_ms=${LOCAL_ADJ_MS:-0} buffer_ms=$TARGET (log tag $stamp)"
-    SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE RUNDIR_FILE=$RUNDIR_FILE DEVICES=$DEVICES STAMP=$stamp DEBUG=3 zsh $RUN_PAIR live $LATENCY $TARGET >> $LOG 2>&1 &
+    # 起播前就定好內容類型：光暈關著時一開始就標成影片，燈不會先亮一下
+    mt=$(start_mt)
+    CLIAIRPLAY_MEDIA_TYPE=$mt SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE RUNDIR_FILE=$RUNDIR_FILE DEVICES=$DEVICES STAMP=$stamp DEBUG=3 zsh $RUN_PAIR live $LATENCY $TARGET >> $LOG 2>&1 &
     child=$!
     reason="" began=$SECONDS
     while ps -p $child >/dev/null 2>&1; do
@@ -280,6 +282,7 @@ known() { [[ $1 == [0-9A-F](#c12) ]] && grep -q "^$1"$'\t' $SPEAKERS 2>/dev/null
 typeset -A GLOW_PRESETS=(warm "FF2D2D FF8C00 FFD400 000000" cool "1E40FF 8A2BE2 00B4FF 000000" aurora "00C853 00E5C0 7CFC00 000000" candy "FF4FA3 B14CFF 4CC9FF 000000")
 GLOW_DELAY=${GLOW_DELAY:-2}  # SENDMETA 會把顏色重設成白色；是否要隔一段才送封面沒實測過，先等這幾秒
 typeset -A glow_sent  # 每個 cmd 管道收過什麼：「meta@<該送封面的 SECONDS>」或「art:<封面檔名>」；沒有這個鍵就是什麼都沒收過
+typeset -A glow_mt    # 每個 cmd 管道標成哪種內容（music／video）；沒有這個鍵就是還沒送過 MEDIATYPE
 glow_rd=""
 glow_open=""  # 已過起播保護的 run dir
 glow_made=""  # glow.jpg 目前是哪組顏色畫的
@@ -291,12 +294,17 @@ glow_colors() {
   fi
   true
 }
-# 每個 session 的每個管道：沒收過就送 SENDMETA、隔 GLOW_DELAY 秒再送 ARTWORK=；顏色換了只送新的 ARTWORK=。
-# 播放中改成 off 什麼都不送，下次起播才生效（已經亮著的燈沒有關掉的指令）
+# 關燈：Sound Glow 看影片時不亮（Apple 說明，11-19 實測和「家庭」App 關掉一樣暗），封面再黑也只會變成預設白光。
+# 所以關的時候把播放內容標成影片（MEDIATYPE=video），開的時候標回音樂，播放中切換立即生效、不斷音
+glow_mt_now() { [[ -n $(glow_colors) ]] && print music || print video }
+# on／supervise／reroute 是另外的行程，沒有 serve 的 $dir：serve 用 GLOW_DIR 傳下來。沒有（手動跑 on）就照 cliairplay 預設的音樂
+start_mt() { if [[ -n ${GLOW_DIR:-} ]]; then dir=$GLOW_DIR glow_mt_now; else print music; fi }
+# 每個 session 的每個管道：內容類型和設定不同就送 MEDIATYPE；開的時候沒收過就送 SENDMETA、隔 GLOW_DELAY 秒再送 ARTWORK=，
+# 顏色換了只送新的 ARTWORK=。關了再開不重送封面：MEDIATYPE=music 會帶著 cliairplay 留著的封面重送一次
 glow_tick() {
-  local -a cols ids; local id p s jpg key
-  if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_rd=""; return 0; fi
-  [[ $rd != $glow_rd ]] && { glow_sent=(); glow_rd=$rd; }
+  local -a cols ids; local id p s jpg key mt=video
+  if [[ $rd != /tmp/cliairplay-pair.* && ! ( -n ${TEST:-} && $rd == $STATE/* ) ]] || [[ ! ( -O $rd && -f $rd/ready ) ]]; then glow_sent=(); glow_mt=(); glow_rd=""; return 0; fi
+  [[ $rd != $glow_rd ]] && { glow_sent=(); glow_mt=(); glow_rd=$rd; }
   # ready 比 START 早建：cliairplay 依序處理 cmd，SENDMETA 是阻塞的網路呼叫，排在 START 前會讓那台的 START 晚到、左右各自重新對時。
   # 一定要等 start_ms 存在、且過了起播時刻再多 1 秒才碰任何管道。用這段 session 的時鐘（clock_offset＋stereotool now）比，
   # 牆上時鐘被調整也不會提早或延後放行；放行過就記住，之後每輪不再叫 stereotool。
@@ -306,13 +314,20 @@ glow_tick() {
     [[ $sm == <-> && $off == (|-)<-> ]] && (( $($TOOL now $off 2>/dev/null || print 0) >= sm + 1000 )) || return 0
     glow_open=$rd
   fi
-  cols=(${=$(glow_colors)}); (( $#cols )) || return 0
-  jpg=$STATE/glow.jpg; key=${(j:-:)cols}  # 只留一張圖，顏色變了才原子換掉；送過什麼以顏色記，不以檔名記
-  [[ $key == $glow_made && -f $jpg ]] || { $TOOL glowart $jpg $cols 2>/dev/null || return 0; glow_made=$key; }
+  cols=(${=$(glow_colors)})
+  if (( $#cols )); then
+    mt=music jpg=$STATE/glow.jpg key=${(j:-:)cols}  # 只留一張圖，顏色變了才原子換掉；送過什麼以顏色記，不以檔名記
+    # 產圖失敗照樣標回音樂（cliairplay 會帶著留著的封面重送），只是這輪不送新封面、下一輪再試
+    [[ $key == $glow_made && -f $jpg ]] || { $TOOL glowart $jpg $cols 2>/dev/null && glow_made=$key || cols=() }
+  fi
   ids=(${=$(head -c 64 $DEVFILE 2>/dev/null)})
   for id in $ids; do
     [[ $id == [0-9A-F](#c12) ]] || continue
     p=$rd/cmd-$id$(sfx $id); [[ -p $p ]] || continue
+    # shortcut: 寫進管道就算送到（和 SENDMETA、ARTWORK 一樣），cliairplay 推送失敗不會重送，燈要等下次切換才對；
+    #   加入喇叭（reroute）時 serve 要等它做完才回到這裡，這幾秒內切換也會晚到。遇到再讓 cliairplay 回報結果
+    [[ ${glow_mt[$p]:-} == $mt ]] || { send_cmd $p "MEDIATYPE=$mt" && glow_mt[$p]=$mt; }
+    (( $#cols )) || continue
     s=${glow_sent[$p]:-}
     if [[ -z $s ]]; then
       send_cmd $p "TITLE=DualPod"$'\n'"ARTIST=Mac"$'\n'"ITEMID=airplay-stereo"$'\n'"ACTION=SENDMETA" && glow_sent[$p]=meta@$(( SECONDS + GLOW_DELAY ))
@@ -385,7 +400,7 @@ case ${1:-status} in
         [[ $d == $j || -n $SFX[$d] ]] || grep -q "STATUS\] started requested_unix_ms=$T at_unix_ms=$T\( \|$\)" $LOGDIR/pair-$stamp-$d.log 2>/dev/null || exit 1
       done
       rm -f $rd/join.out  # 上一次加入留下的 ready 行不能被當成這次的
-      SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE LOGDIR=$LOGDIR DEBUG=3 zsh $RUN_PAIR join $rd $j < /dev/null > $rd/join.out 2>> $LOG &!
+      CLIAIRPLAY_MEDIA_TYPE=$(start_mt) SPEAKERS=$SPEAKERS VOLFILE=$VOLFILE LOGDIR=$LOGDIR DEBUG=3 zsh $RUN_PAIR join $rd $j < /dev/null > $rd/join.out 2>> $LOG &!
       jpid=$!
       # 之後任何失敗都只收掉新加的這台（它自己會請喇叭斷開），原本那台留給 serve 的重啟處理
       trap 'rmdir $STATE/reroute.lock 2>/dev/null; [[ -z $joined ]] && { say "reroute: 加入 $j 失敗，退回重啟"; kill -TERM $jpid 2>/dev/null }' EXIT
@@ -490,10 +505,10 @@ case ${1:-status} in
           left=$(read_user $dir/left | tr -cd 'A-Z0-9')
           [[ " $want " == *" $left "* && $left != Mac ]] || left=${want%% *}
           # 只是裝置組合變動（少一台、開關 Mac）就不中斷留下的輸出；reroute 做不到才關了再開
-          if ! { [[ -z $cfg_changed ]] && running && LEFT=$left zsh $0 reroute ${=want} }; then
+          if ! { [[ -z $cfg_changed ]] && running && LEFT=$left GLOW_DIR=$dir zsh $0 reroute ${=want} }; then
             running && zsh $0 off
             buf=$(read_user $dir/buffer-ms | tr -d ' \n')  # 範圍由 on 那邊的 <120-500> 驗證，不合就用預設
-            LEFT=$left LOCAL_ADJ_MS=$adj BUFFER_MS=$buf zsh $0 on ${=want}
+            LEFT=$left LOCAL_ADJ_MS=$adj BUFFER_MS=$buf GLOW_DIR=$dir zsh $0 on ${=want}
           else vdone=""  # 播放中加入的那台也要收到存成 0 的音量
           fi
         fi
